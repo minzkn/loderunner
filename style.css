@@ -64,6 +64,31 @@ body {
     text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
 }
 
+#sound-toggle {
+    cursor: pointer;
+    font-size: calc(20px * var(--scale));
+    transition: transform 0.1s ease;
+    user-select: none;
+}
+
+#sound-toggle:hover {
+    transform: scale(1.2);
+}
+
+#sound-toggle:active {
+    transform: scale(0.9);
+}
+
+#sound-toggle.muted #sound-icon::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    background: #FF5555;
+    transform: rotate(-45deg);
+    top: 50%;
+}
+
 #game-canvas {
     display: block;
     background-color: #0000AA;
