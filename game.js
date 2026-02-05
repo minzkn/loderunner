@@ -4227,9 +4227,10 @@
 
             // Demo mode
             this.demoMode = false;
-            this.demoTimer = 0;
             this.demoMoveTimer = 0;
             this.demoTargetGold = null;
+            this.lastInputTime = 0;  // 마지막 사용자 입력 시간 (frameCount 기준)
+            this.idleTimeoutFrames = 900;  // 30초 (30fps * 30초)
 
             this.sound = new Sound();
 
@@ -4359,6 +4360,12 @@
 
             const handleKey = (e, isDown) => {
                 if (e.isComposing || e.keyCode === 229) return;
+
+                // 사용자 입력 시간 업데이트 (데모 타이머 리셋)
+                if (isDown) {
+                    this.lastInputTime = this.frameCount;
+                }
+
                 const key = keyCodeMap[e.keyCode];
                 if (key) {
                     this.keys[key] = isDown;
@@ -4445,7 +4452,7 @@
         showTitle() {
             this.gameState = STATE.TITLE;
             this.demoMode = false;
-            this.demoTimer = 150;  // 5초 후 데모 시작 (30fps)
+            this.lastInputTime = this.frameCount;  // 입력 타이머 리셋
             this.activeLevels = this.gameMode === 'championship' ? CHAMPIONSHIP_LEVELS : LEVELS;
             this.loadLevel(1);
             this.updateTitleMessage();
@@ -4776,6 +4783,7 @@
 
         startGame() {
             this.demoMode = false;
+            this.lastInputTime = this.frameCount;  // 입력 타이머 리셋
             this.score = 0;
             this.lives = 5;
             this.currentLevel = 1;
@@ -6516,10 +6524,10 @@
             const delta = now - this.lastTime;
 
             if (delta >= this.tickRate) {
-                // Demo mode timer (start demo after idle on title)
-                if (this.gameState === STATE.TITLE && !this.demoMode) {
-                    this.demoTimer--;
-                    if (this.demoTimer <= 0) {
+                // Demo mode timer - 30초 무입력 시 데모 전환
+                if (!this.demoMode) {
+                    const idleTime = this.frameCount - this.lastInputTime;
+                    if (idleTime >= this.idleTimeoutFrames) {
                         this.startDemo();
                     }
                 }
