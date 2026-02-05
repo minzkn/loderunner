@@ -1,0 +1,19 @@
+# Backup files
+*.backup
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Launch scripts (local only)
+__launch-*.sh

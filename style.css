@@ -1,0 +1,166 @@
+/* Lode Runner - VGA Style (Responsive) */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --game-width: 672px;
+    --game-height: 384px;
+    --scale: 1;
+}
+
+body {
+    background: linear-gradient(135deg, #000055 0%, #000022 50%, #000055 100%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+}
+
+#game-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: linear-gradient(180deg, #000044 0%, #000022 100%);
+    padding: calc(15px * var(--scale));
+    border: calc(4px * var(--scale)) solid #5555FF;
+    border-radius: calc(8px * var(--scale));
+    box-shadow:
+        0 0 calc(30px * var(--scale)) rgba(85, 85, 255, 0.5),
+        0 0 calc(60px * var(--scale)) rgba(85, 85, 255, 0.3),
+        inset 0 0 calc(20px * var(--scale)) rgba(0, 0, 0, 0.5);
+    transform-origin: center center;
+}
+
+#header {
+    width: calc(var(--game-width) * var(--scale));
+    background: linear-gradient(180deg, #000088 0%, #000044 100%);
+    color: #55FFFF;
+    font-size: calc(16px * var(--scale));
+    font-weight: bold;
+    padding: calc(10px * var(--scale)) calc(15px * var(--scale));
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Courier New', monospace;
+    letter-spacing: calc(2px * var(--scale));
+    border: calc(2px * var(--scale)) solid #5555FF;
+    border-bottom: none;
+    border-radius: calc(4px * var(--scale)) calc(4px * var(--scale)) 0 0;
+}
+
+#header .label {
+    color: #FFFF55;
+    text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
+}
+
+#header .value {
+    color: #FFFFFF;
+    margin-left: calc(8px * var(--scale));
+    text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
+}
+
+#game-canvas {
+    display: block;
+    background-color: #0000AA;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: calc(2px * var(--scale)) solid #5555FF;
+    width: calc(var(--game-width) * var(--scale));
+    height: calc(var(--game-height) * var(--scale));
+}
+
+#message {
+    width: calc(var(--game-width) * var(--scale));
+    background: linear-gradient(180deg, #000044 0%, #000088 100%);
+    color: #FFFF55;
+    font-size: calc(18px * var(--scale));
+    font-weight: bold;
+    text-align: center;
+    padding: calc(12px * var(--scale));
+    min-height: calc(44px * var(--scale));
+    font-family: 'Courier New', monospace;
+    letter-spacing: calc(3px * var(--scale));
+    border: calc(2px * var(--scale)) solid #5555FF;
+    border-top: none;
+    text-shadow: calc(2px * var(--scale)) calc(2px * var(--scale)) 0 #000000;
+    border-radius: 0 0 calc(4px * var(--scale)) calc(4px * var(--scale));
+}
+
+#instructions {
+    color: #55FFFF;
+    font-size: calc(11px * var(--scale));
+    text-align: center;
+    padding: calc(10px * var(--scale));
+    font-family: 'Courier New', monospace;
+    max-width: calc(var(--game-width) * var(--scale));
+    line-height: 1.5;
+    text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
+}
+
+#instructions p {
+    margin: calc(3px * var(--scale)) 0;
+}
+
+/* Death reason overlay */
+#death-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    border-radius: calc(4px * var(--scale));
+}
+
+#death-overlay.visible {
+    display: flex;
+}
+
+#death-overlay h2 {
+    color: #FF5555;
+    font-size: calc(28px * var(--scale));
+    font-family: 'Courier New', monospace;
+    margin-bottom: calc(20px * var(--scale));
+    text-shadow: calc(3px * var(--scale)) calc(3px * var(--scale)) 0 #000000;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+#death-overlay .reason {
+    color: #FFFF55;
+    font-size: calc(16px * var(--scale));
+    font-family: 'Courier New', monospace;
+    text-align: center;
+    max-width: 80%;
+    line-height: 1.8;
+    margin-bottom: calc(20px * var(--scale));
+    text-shadow: calc(2px * var(--scale)) calc(2px * var(--scale)) 0 #000000;
+}
+
+#death-overlay .hint {
+    color: #55FFFF;
+    font-size: calc(14px * var(--scale));
+    font-family: 'Courier New', monospace;
+    text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.05); }
+}
+
+/* Canvas wrapper for overlay positioning */
+#canvas-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
