@@ -4516,7 +4516,10 @@
             }
 
             // 낙하 중이면 아무것도 하지 않음 (자연스러운 낙하)
-            if (p.vy > 0.1) return;
+            if (p.vy > 0.1) {
+                this.updateDemoKeyDisplay();
+                return;
+            }
 
             const onLadder = this.isLadder(px, py);
             const onBar = this.isBar(px, py);
@@ -4541,6 +4544,7 @@
                     this.keys[dig] = true;
                     this.demoStuckCounter = 0;
                     this.demoPositionHistory = [];
+                    this.updateDemoKeyDisplay();
                     return;
                 }
 
@@ -4556,6 +4560,7 @@
                     const newDir = escapeOptions[Math.floor(Math.random() * escapeOptions.length)];
                     this.keys[newDir] = true;
                     this.demoStuckCounter = 0;
+                    this.updateDemoKeyDisplay();
                     return;
                 }
             }
@@ -4581,12 +4586,15 @@
 
                 if (canEscapeH) {
                     this.keys[escapeDir < 0 ? 'LEFT' : 'RIGHT'] = true;
+                    this.updateDemoKeyDisplay();
                     return;
                 } else if (canEscapeUp) {
                     this.keys.UP = true;
+                    this.updateDemoKeyDisplay();
                     return;
                 } else if (canEscapeDown) {
                     this.keys.DOWN = true;
+                    this.updateDemoKeyDisplay();
                     return;
                 }
             }
@@ -4691,6 +4699,7 @@
                 else if (action === 'DOWN') this.keys.DOWN = true;
                 else if (action === 'DIGL') this.keys.DIGL = true;
                 else if (action === 'DIGR') this.keys.DIGR = true;
+                this.updateDemoKeyDisplay();
                 return;
             }
 
@@ -4715,15 +4724,19 @@
                     // 적 방향으로 이동
                     if (gex < px && !this.isSolid(px - 1, py) && (hasFloor || onBar)) {
                         this.keys.LEFT = true;
+                        this.updateDemoKeyDisplay();
                         return;
                     } else if (gex > px && !this.isSolid(px + 1, py) && (hasFloor || onBar)) {
                         this.keys.RIGHT = true;
+                        this.updateDemoKeyDisplay();
                         return;
                     } else if (gey < py && (onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1)) {
                         this.keys.UP = true;
+                        this.updateDemoKeyDisplay();
                         return;
                     } else if (gey > py && (onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1)) {
                         this.keys.DOWN = true;
+                        this.updateDemoKeyDisplay();
                         return;
                     }
                 }
@@ -4767,6 +4780,24 @@
 
                 this.keys[action] = true;
             }
+
+            // DEMO 모드에서 키 표시 업데이트
+            this.updateDemoKeyDisplay();
+        }
+
+        // DEMO 모드용 키 표시 업데이트 메서드
+        updateDemoKeyDisplay() {
+            const keyMap = ['LEFT', 'RIGHT', 'UP', 'DOWN', 'DIGL', 'DIGR'];
+            keyMap.forEach(key => {
+                const keyEl = document.querySelector(`#key-display .key-item[data-key="${key}"]`);
+                if (keyEl) {
+                    if (this.keys[key]) {
+                        keyEl.classList.add('active');
+                    } else {
+                        keyEl.classList.remove('active');
+                    }
+                }
+            });
         }
 
         toggleGameMode() {
@@ -5545,6 +5576,9 @@
         checkStuck() {
             if (this.gameState !== STATE.PLAYING) return;
 
+            // DEMO 모드에서는 스턱 체크 비활성화 (AI가 최적 플레이를 하지 않을 수 있음)
+            if (this.demoMode) return;
+
             // Grace period after level start
             if (this.levelStartGrace > 0) {
                 this.levelStartGrace--;
@@ -5823,6 +5857,15 @@
 
         triggerStuck(reason) {
             if (this.gameState !== STATE.PLAYING) return;
+
+            // DEMO 모드에서는 오버레이 없이 자동으로 다른 레벨로 이동
+            if (this.demoMode) {
+                this.currentLevel = Math.floor(Math.random() * Math.min(10, this.activeLevels.length)) + 1;
+                this.loadLevel(this.currentLevel);
+                this.gameState = STATE.PLAYING;
+                this.showMessage('DEMO - PRESS ENTER TO PLAY');
+                return;
+            }
 
             this.gameState = STATE.STUCK;
             this.stuckReason = reason;

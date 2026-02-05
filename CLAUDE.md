@@ -82,6 +82,11 @@ findReachablePositions(startX, startY)
 getPossibleMoves(x, y)
 triggerStuck(reason)
 
+// DEMO 모드
+startDemo()
+updateDemo()
+updateDemoKeyDisplay()
+
 // 렌더링 (벡터 그래픽)
 drawTile(x, y, tile)
 drawBrick(px, py)
@@ -154,6 +159,14 @@ E = enemy
 ### 사망 오버레이
 - 스턱 원인 설명 표시
 - ENTER로 계속 진행
+
+### DEMO 모드
+- 30초 무입력 시 자동 전환
+- BFS 기반 AI가 금괴 수집/탈출 시도
+- 교착 감지 및 자동 해결 (위치 히스토리 추적)
+- 적 회피 및 금괴 운반 적 추적
+- 키 입력 실시간 표시
+- ENTER로 게임 모드 복귀
 
 ## 커스텀 스킬
 
