@@ -15,9 +15,9 @@ Claude Code (claude.ai/code)가 이 프로젝트에서 작업할 때 참고하�
 ### 파일 구조
 | 파일 | 설명 | 크기 |
 |------|------|------|
-| `index.html` | 게임 컨테이너, 오버레이 UI | 41줄 |
-| `style.css` | 반응형 VGA 스타일, CSS 변수 | 167줄 |
-| `game.js` | 전체 게임 로직 (단일 IIFE) | 2011줄 |
+| `index.html` | 게임 컨테이너, 오버레이 UI | ~58줄 |
+| `style.css` | 반응형 VGA 스타일, CSS 변수 | ~256줄 |
+| `game.js` | 전체 게임 로직 (단일 IIFE) | ~6600줄 |
 
 ### 핵심 상수
 ```javascript
@@ -95,7 +95,7 @@ createRadialGradient(x, y, r1, r2, color1, color2)
 
 ## 1983 원작 메카닉
 
-- 150개 레벨 (현재 15개 구현)
+- 150개 Classic 레벨 + 50개 Championship 레벨 구현
 - 플레이어는 점프 불가, 무한 낙하 가능
 - 벽돌만 파기 가능 (좌/우)
 - 구멍은 180프레임(~6초) 후 복구
@@ -104,7 +104,7 @@ createRadialGradient(x, y, r1, r2, color1, color2)
 - 가드는 금괴 1개 운반/드롭
 - 가드 사망 시 상단 랜덤 위치에서 리스폰
 - 모든 금괴 수집 → 탈출 사다리 활성화
-- 레벨 클리어 → +1500점, +1 목숨
+- 레벨 클리어 → +2000점, +1 목숨
 
 ## 조작법
 
@@ -125,7 +125,7 @@ createRadialGradient(x, y, r1, r2, color1, color2)
 E = enemy
 ```
 
-28x16 그리드, 마지막 줄은 항상 `@` (단단한 바닥)
+28x16 그리드 (일부 레벨은 바닥이 없는 특수 구조)
 
 ## 구현된 기능
 
@@ -135,7 +135,7 @@ E = enemy
 - devicePixelRatio 지원 (Retina)
 
 ### 반응형 스케일링
-- 브라우저 크기에 맞게 0.8x ~ 3.0x 스케일
+- 브라우저 크기에 맞게 0.5x ~ 2.5x 스케일
 - CSS 변수 (`--scale`, `--game-width`, `--game-height`)
 
 ### 향상된 적 AI

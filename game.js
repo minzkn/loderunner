@@ -4367,11 +4367,6 @@
                     updateKeyDisplay(key, isDown);
                 }
 
-                // 'S' 키로 사운드 토글
-                if (isDown && e.keyCode === 83 && !keyCodeMap[e.keyCode]) {
-                    // 83 = 'S', 하지만 WASD에서 DOWN으로 매핑되어 있으므로 별도 처리
-                }
-
                 // 'C' 키로 게임 모드 전환 (타이틀에서만)
                 if (isDown && e.keyCode === 67 && this.gameState === STATE.TITLE) {
                     this.toggleGameMode();
