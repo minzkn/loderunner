@@ -4230,6 +4230,8 @@
             this.demoMoveTimer = 0;
             this.demoTargetGold = null;
             this.lastDemoDir = 'H';  // 마지막 이동 방향 (H: 수평, V: 수직)
+            this.demoPositionHistory = [];  // 최근 위치 히스토리 (교착 감지용)
+            this.demoStuckCounter = 0;  // 교착 카운터
             this.lastInputTime = 0;  // 마지막 사용자 입력 시간 (frameCount 기준)
             this.idleTimeoutFrames = 900;  // 30초 (30fps * 30초)
 
@@ -4485,6 +4487,7 @@
             const p = this.player;
             const px = Math.floor(p.x + 0.5);
             const py = Math.floor(p.y + 0.5);
+            const posKey = `${px},${py}`;
 
             // 키 초기화
             this.keys.LEFT = false;
@@ -4494,17 +4497,68 @@
             this.keys.DIGL = false;
             this.keys.DIGR = false;
 
-            // 낙하 중이면 좌우 이동만 허용
-            if (p.vy > 0.1) {
-                // 낙하 중에도 좌우로 이동 시도
-                if (!this.isSolid(px - 1, py)) this.keys.LEFT = Math.random() > 0.5;
-                else if (!this.isSolid(px + 1, py)) this.keys.RIGHT = true;
-                return;
+            // === 교착 감지 ===
+            this.demoPositionHistory.push(posKey);
+            if (this.demoPositionHistory.length > 60) {
+                this.demoPositionHistory.shift();
             }
+
+            // 최근 60프레임(약 4초) 동안 같은 영역(3x3)에 있으면 교착
+            let isStuck = false;
+            if (this.demoPositionHistory.length >= 60) {
+                const recentPositions = new Set(this.demoPositionHistory.slice(-30));
+                if (recentPositions.size <= 6) {
+                    isStuck = true;
+                    this.demoStuckCounter++;
+                } else {
+                    this.demoStuckCounter = 0;
+                }
+            }
+
+            // 낙하 중이면 아무것도 하지 않음 (자연스러운 낙하)
+            if (p.vy > 0.1) return;
 
             const onLadder = this.isLadder(px, py);
             const onBar = this.isBar(px, py);
             const hasFloor = this.isSolid(px, py + 1) || this.isLadder(px, py + 1) || onLadder;
+            const isEscaping = this.escapeLadderActive;
+
+            // === 교착 해결: 강제로 파기 또는 새로운 방향 ===
+            if (isStuck && this.demoStuckCounter > 2) {
+                // 파기 가능한 곳 찾아서 파기
+                const digOptions = [];
+                if (hasFloor && px > 0 && !this.isSolid(px - 1, py)) {
+                    const tile = this.getTile(px - 1, py + 1);
+                    if (tile === TILE.BRICK || tile === TILE.TRAP) digOptions.push('DIGL');
+                }
+                if (hasFloor && px < LEVEL_WIDTH - 1 && !this.isSolid(px + 1, py)) {
+                    const tile = this.getTile(px + 1, py + 1);
+                    if (tile === TILE.BRICK || tile === TILE.TRAP) digOptions.push('DIGR');
+                }
+
+                if (digOptions.length > 0) {
+                    const dig = digOptions[Math.floor(Math.random() * digOptions.length)];
+                    this.keys[dig] = true;
+                    this.demoStuckCounter = 0;
+                    this.demoPositionHistory = [];
+                    return;
+                }
+
+                // 파기 불가능하면 랜덤 방향으로 이동
+                const escapeOptions = [];
+                if (!this.isSolid(px - 1, py) && (hasFloor || onBar)) escapeOptions.push('LEFT');
+                if (!this.isSolid(px + 1, py) && (hasFloor || onBar)) escapeOptions.push('RIGHT');
+                if ((onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1)) escapeOptions.push('UP');
+                if ((onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1)) escapeOptions.push('DOWN');
+
+                if (escapeOptions.length > 0) {
+                    // 이전에 안 갔던 방향 우선
+                    const newDir = escapeOptions[Math.floor(Math.random() * escapeOptions.length)];
+                    this.keys[newDir] = true;
+                    this.demoStuckCounter = 0;
+                    return;
+                }
+            }
 
             // === 적 분석 ===
             const nearbyEnemies = [];
@@ -4516,121 +4570,17 @@
                 nearbyEnemies.push({ e, ex, ey, dist, dx: ex - px, dy: ey - py });
             }
             nearbyEnemies.sort((a, b) => a.dist - b.dist);
-
             const closestEnemy = nearbyEnemies[0];
-            const sameLevelEnemy = nearbyEnemies.find(en => en.ey === py);
 
-            // === BFS로 금괴/탈출 경로 찾기 (파기 포함) ===
-            const visited = new Map();
-            const queue = [{ x: px, y: py, path: [], dug: false }];
-            visited.set(`${px},${py}`, true);
+            // === 위험한 적 회피 (아주 가까울 때만) ===
+            if (closestEnemy && closestEnemy.dist <= 2) {
+                const escapeDir = closestEnemy.dx < 0 ? 1 : -1;
+                const canEscapeH = !this.isSolid(px + escapeDir, py) && (hasFloor || onBar);
+                const canEscapeUp = (onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1);
+                const canEscapeDown = (onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1);
 
-            let targetPath = null;
-            const isEscaping = this.escapeLadderActive;
-
-            while (queue.length > 0 && !targetPath) {
-                const current = queue.shift();
-                const { x, y, path, dug } = current;
-
-                // 목표 확인
-                if (isEscaping) {
-                    if (y === 0 && this.getTile(x, y) === TILE.ESCAPE_LADDER) {
-                        targetPath = path;
-                        break;
-                    }
-                } else {
-                    if (this.getTile(x, y) === TILE.GOLD) {
-                        targetPath = path;
-                        break;
-                    }
-                }
-
-                const currOnLadder = this.isLadder(x, y);
-                const currOnBar = this.isBar(x, y);
-                const currHasFloor = this.isSolid(x, y + 1) || this.isLadder(x, y + 1) || currOnLadder;
-                const canMove = currHasFloor || currOnBar || currOnLadder;
-
-                const moves = [];
-
-                // 일반 이동
-                if (x > 0 && !this.isSolid(x - 1, y) && canMove) {
-                    moves.push({ x: x - 1, y, action: 'LEFT' });
-                }
-                if (x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y) && canMove) {
-                    moves.push({ x: x + 1, y, action: 'RIGHT' });
-                }
-                if (y > 0 && !this.isSolid(x, y - 1) && (currOnLadder || this.isLadder(x, y - 1))) {
-                    moves.push({ x, y: y - 1, action: 'UP' });
-                }
-                if (y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
-                    if (currOnLadder || this.isLadder(x, y + 1) || currOnBar) {
-                        moves.push({ x, y: y + 1, action: 'DOWN' });
-                    }
-                }
-                // 낙하
-                if (!currHasFloor && !currOnBar && y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
-                    moves.push({ x, y: y + 1, action: 'FALL' });
-                }
-
-                // 파기를 통한 이동 (아직 파기 안 했으면)
-                if (!dug && canMove) {
-                    // 왼쪽 파기
-                    if (x > 0 && !this.isSolid(x - 1, y)) {
-                        const digTile = this.getTile(x - 1, y + 1);
-                        if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
-                            moves.push({ x: x - 1, y: y + 1, action: 'DIGL', isDig: true });
-                        }
-                    }
-                    // 오른쪽 파기
-                    if (x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y)) {
-                        const digTile = this.getTile(x + 1, y + 1);
-                        if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
-                            moves.push({ x: x + 1, y: y + 1, action: 'DIGR', isDig: true });
-                        }
-                    }
-                }
-
-                for (const move of moves) {
-                    const key = `${move.x},${move.y}`;
-                    if (!visited.has(key)) {
-                        visited.set(key, true);
-                        queue.push({
-                            x: move.x,
-                            y: move.y,
-                            path: [...path, move.action],
-                            dug: dug || move.isDig
-                        });
-                    }
-                }
-            }
-
-            // === 적 회피 (가까운 적이 있을 때) ===
-            if (closestEnemy && closestEnemy.dist <= 3) {
-                const enemyDir = closestEnemy.dx < 0 ? -1 : 1;
-                const escapeDir = -enemyDir;
-
-                // 같은 층 적에게 함정 파기
-                if (sameLevelEnemy && sameLevelEnemy.dist <= 4 && sameLevelEnemy.dist >= 2 && hasFloor) {
-                    const digX = px + enemyDir;
-                    const digY = py + 1;
-                    if (digX >= 0 && digX < LEVEL_WIDTH && !this.isSolid(digX, py)) {
-                        const tile = this.getTile(digX, digY);
-                        if (tile === TILE.BRICK || tile === TILE.TRAP) {
-                            if (enemyDir < 0) this.keys.DIGL = true;
-                            else this.keys.DIGR = true;
-                            return;
-                        }
-                    }
-                }
-
-                // 도망
-                const canEscapeH = !this.isSolid(px + escapeDir, py);
-                const canEscapeUp = onLadder && !this.isSolid(px, py - 1);
-                const canEscapeDown = (onLadder || this.isLadder(px, py + 1)) && !this.isSolid(px, py + 1);
-
-                if (canEscapeH && hasFloor) {
-                    if (escapeDir < 0) this.keys.LEFT = true;
-                    else this.keys.RIGHT = true;
+                if (canEscapeH) {
+                    this.keys[escapeDir < 0 ? 'LEFT' : 'RIGHT'] = true;
                     return;
                 } else if (canEscapeUp) {
                     this.keys.UP = true;
@@ -4639,6 +4589,97 @@
                     this.keys.DOWN = true;
                     return;
                 }
+            }
+
+            // === BFS로 금괴/탈출 경로 찾기 ===
+            const findPath = (allowDig) => {
+                const visited = new Map();
+                const queue = [{ x: px, y: py, path: [], dug: false }];
+                visited.set(`${px},${py}:0`, true);
+
+                while (queue.length > 0) {
+                    const current = queue.shift();
+                    const { x, y, path, dug } = current;
+
+                    // 목표 확인
+                    if (isEscaping) {
+                        if (y === 0 && this.getTile(x, y) === TILE.ESCAPE_LADDER) {
+                            return path;
+                        }
+                    } else {
+                        if (this.getTile(x, y) === TILE.GOLD) {
+                            return path;
+                        }
+                    }
+
+                    // 경로가 너무 길면 중단
+                    if (path.length > 100) continue;
+
+                    const currOnLadder = this.isLadder(x, y);
+                    const currOnBar = this.isBar(x, y);
+                    const currHasFloor = this.isSolid(x, y + 1) || this.isLadder(x, y + 1) || currOnLadder;
+                    const canMove = currHasFloor || currOnBar || currOnLadder;
+
+                    const moves = [];
+
+                    // 일반 이동
+                    if (x > 0 && !this.isSolid(x - 1, y) && canMove) {
+                        moves.push({ x: x - 1, y, action: 'LEFT', dig: false });
+                    }
+                    if (x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y) && canMove) {
+                        moves.push({ x: x + 1, y, action: 'RIGHT', dig: false });
+                    }
+                    if (y > 0 && !this.isSolid(x, y - 1) && (currOnLadder || this.isLadder(x, y - 1))) {
+                        moves.push({ x, y: y - 1, action: 'UP', dig: false });
+                    }
+                    if (y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
+                        if (currOnLadder || this.isLadder(x, y + 1) || currOnBar) {
+                            moves.push({ x, y: y + 1, action: 'DOWN', dig: false });
+                        }
+                    }
+                    // 낙하
+                    if (!currHasFloor && !currOnBar && y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
+                        moves.push({ x, y: y + 1, action: 'FALL', dig: false });
+                    }
+
+                    // 파기를 통한 경로 (한 번만)
+                    if (allowDig && !dug && canMove) {
+                        if (x > 0 && !this.isSolid(x - 1, y)) {
+                            const digTile = this.getTile(x - 1, y + 1);
+                            if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
+                                // 파기 후 그 방향으로 이동 + 낙하
+                                moves.push({ x: x - 1, y: y + 1, action: 'DIGL', dig: true });
+                            }
+                        }
+                        if (x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y)) {
+                            const digTile = this.getTile(x + 1, y + 1);
+                            if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
+                                moves.push({ x: x + 1, y: y + 1, action: 'DIGR', dig: true });
+                            }
+                        }
+                    }
+
+                    for (const move of moves) {
+                        const key = `${move.x},${move.y}:${dug || move.dig ? 1 : 0}`;
+                        if (!visited.has(key)) {
+                            visited.set(key, true);
+                            queue.push({
+                                x: move.x,
+                                y: move.y,
+                                path: [...path, move.action],
+                                dug: dug || move.dig
+                            });
+                        }
+                    }
+                }
+                return null;
+            };
+
+            // 먼저 파기 없이 경로 찾기
+            let targetPath = findPath(false);
+            // 없으면 파기 포함해서 찾기
+            if (!targetPath) {
+                targetPath = findPath(true);
             }
 
             // === 경로 따라 이동 ===
@@ -4653,52 +4694,49 @@
                 return;
             }
 
-            // === 도달 불가능한 금괴 방향으로 이동 + 파기 ===
-            if (!isEscaping) {
-                for (let gy = 0; gy < LEVEL_HEIGHT; gy++) {
-                    for (let gx = 0; gx < LEVEL_WIDTH; gx++) {
-                        if (this.getTile(gx, gy) === TILE.GOLD && !visited.has(`${gx},${gy}`)) {
-                            // 금괴 방향으로 파기 시도
-                            const goldDir = gx < px ? -1 : 1;
-                            const digX = px + goldDir;
-                            const digY = py + 1;
+            // === 금괴가 없으면 (적이 가지고 있음) 적 쫓아가기 ===
+            let hasVisibleGold = false;
+            for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                for (let x = 0; x < LEVEL_WIDTH; x++) {
+                    if (this.getTile(x, y) === TILE.GOLD) {
+                        hasVisibleGold = true;
+                        break;
+                    }
+                }
+                if (hasVisibleGold) break;
+            }
 
-                            if (hasFloor && digX >= 0 && digX < LEVEL_WIDTH && !this.isSolid(digX, py)) {
-                                const tile = this.getTile(digX, digY);
-                                if (tile === TILE.BRICK || tile === TILE.TRAP) {
-                                    if (goldDir < 0) this.keys.DIGL = true;
-                                    else this.keys.DIGR = true;
-                                    return;
-                                }
-                            }
-
-                            // 금괴 방향으로 이동
-                            if (gx < px && !this.isSolid(px - 1, py) && hasFloor) {
-                                this.keys.LEFT = true;
-                                return;
-                            } else if (gx > px && !this.isSolid(px + 1, py) && hasFloor) {
-                                this.keys.RIGHT = true;
-                                return;
-                            } else if (gy < py && onLadder && !this.isSolid(px, py - 1)) {
-                                this.keys.UP = true;
-                                return;
-                            } else if (gy > py && (onLadder || this.isLadder(px, py + 1)) && !this.isSolid(px, py + 1)) {
-                                this.keys.DOWN = true;
-                                return;
-                            }
-                        }
+            if (!hasVisibleGold && !isEscaping && closestEnemy) {
+                // 금괴를 가진 적 찾기
+                const goldEnemy = this.enemies.find(e => e.hasGold);
+                if (goldEnemy) {
+                    const gex = Math.floor(goldEnemy.x + 0.5);
+                    const gey = Math.floor(goldEnemy.y + 0.5);
+                    // 적 방향으로 이동
+                    if (gex < px && !this.isSolid(px - 1, py) && (hasFloor || onBar)) {
+                        this.keys.LEFT = true;
+                        return;
+                    } else if (gex > px && !this.isSolid(px + 1, py) && (hasFloor || onBar)) {
+                        this.keys.RIGHT = true;
+                        return;
+                    } else if (gey < py && (onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1)) {
+                        this.keys.UP = true;
+                        return;
+                    } else if (gey > py && (onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1)) {
+                        this.keys.DOWN = true;
+                        return;
                     }
                 }
             }
 
-            // === 항상 움직이기 (Fallback) - 절대 멈추지 않음 ===
+            // === Fallback: 탐험 모드 ===
             const possibleMoves = [];
             if (!this.isSolid(px - 1, py) && (hasFloor || onBar)) possibleMoves.push('LEFT');
             if (!this.isSolid(px + 1, py) && (hasFloor || onBar)) possibleMoves.push('RIGHT');
             if ((onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1)) possibleMoves.push('UP');
             if ((onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1)) possibleMoves.push('DOWN');
 
-            // 파기도 가능한 행동에 추가
+            // 파기 옵션 추가
             if (hasFloor) {
                 if (px > 0 && !this.isSolid(px - 1, py)) {
                     const tile = this.getTile(px - 1, py + 1);
@@ -4711,14 +4749,18 @@
             }
 
             if (possibleMoves.length > 0) {
-                // 이전 방향 유지 경향 (더 자연스러운 움직임)
-                const preferredMoves = possibleMoves.filter(m =>
+                // 이전 방향 유지 (70% 확률)
+                const dirMoves = possibleMoves.filter(m =>
                     (this.lastDemoDir === 'H' && (m === 'LEFT' || m === 'RIGHT')) ||
                     (this.lastDemoDir === 'V' && (m === 'UP' || m === 'DOWN'))
                 );
 
-                const movesToChoose = preferredMoves.length > 0 && Math.random() > 0.3 ? preferredMoves : possibleMoves;
-                const action = movesToChoose[Math.floor(Math.random() * movesToChoose.length)];
+                let action;
+                if (dirMoves.length > 0 && Math.random() < 0.7) {
+                    action = dirMoves[Math.floor(Math.random() * dirMoves.length)];
+                } else {
+                    action = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                }
 
                 if (action === 'LEFT' || action === 'RIGHT') this.lastDemoDir = 'H';
                 else if (action === 'UP' || action === 'DOWN') this.lastDemoDir = 'V';
