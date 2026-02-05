@@ -4242,16 +4242,17 @@
 
         setupResponsiveCanvas() {
             const resize = () => {
-                // Small margin from viewport edges
-                const margin = 12;
-                const viewportWidth = window.innerWidth - margin * 2;
-                const viewportHeight = window.innerHeight - margin * 2;
+                // Minimal margin from viewport edges (3px top/bottom)
+                const marginY = 3;
+                const marginX = 3;
+                const viewportWidth = window.innerWidth - marginX * 2;
+                const viewportHeight = window.innerHeight - marginY * 2;
 
                 // UI overhead (all proportional to scale):
-                // header: ~30px, message: ~32px, instructions: ~40px, container padding: ~26px
-                // Total overhead base: ~128px (at scale 1)
-                const uiOverheadBase = 100;
-                const containerPadding = 26;
+                // header: ~24px, message: ~24px, instructions: ~50px (with key display),
+                // copyright: ~14px, container padding: ~12px, borders: ~8px
+                const uiOverheadBase = 110;
+                const containerPadding = 12;
 
                 // Calculate scale to fit both width and height
                 const scaleX = viewportWidth / (BASE_WIDTH + containerPadding);
@@ -4344,12 +4345,26 @@
                 13: 'ENTER', 82: 'RESTART', 27: 'ESC'
             };
 
+            // 키 표시 업데이트 함수
+            const updateKeyDisplay = (key, isActive) => {
+                const keyEl = document.querySelector(`#key-display .key-item[data-key="${key}"]`);
+                if (keyEl) {
+                    if (isActive) {
+                        keyEl.classList.add('active');
+                    } else {
+                        keyEl.classList.remove('active');
+                    }
+                }
+            };
+
             const handleKey = (e, isDown) => {
                 if (e.isComposing || e.keyCode === 229) return;
                 const key = keyCodeMap[e.keyCode];
                 if (key) {
                     this.keys[key] = isDown;
                     e.preventDefault();
+                    // 키 표시 업데이트
+                    updateKeyDisplay(key, isDown);
                 }
 
                 // 'S' 키로 사운드 토글
