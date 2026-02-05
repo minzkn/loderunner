@@ -12,14 +12,20 @@
     --scale: 1;
 }
 
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
 body {
     background: linear-gradient(135deg, #000055 0%, #000022 50%, #000055 100%);
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100vh;
     font-family: 'Courier New', monospace;
-    overflow: hidden;
+    margin: 0;
+    padding: 0;
 }
 
 #game-container {
@@ -27,27 +33,28 @@ body {
     flex-direction: column;
     align-items: center;
     background: linear-gradient(180deg, #000044 0%, #000022 100%);
-    padding: calc(15px * var(--scale));
-    border: calc(4px * var(--scale)) solid #5555FF;
-    border-radius: calc(8px * var(--scale));
+    padding: calc(10px * var(--scale));
+    border: calc(3px * var(--scale)) solid #5555FF;
+    border-radius: calc(6px * var(--scale));
     box-shadow:
-        0 0 calc(30px * var(--scale)) rgba(85, 85, 255, 0.5),
-        0 0 calc(60px * var(--scale)) rgba(85, 85, 255, 0.3),
-        inset 0 0 calc(20px * var(--scale)) rgba(0, 0, 0, 0.5);
+        0 0 calc(20px * var(--scale)) rgba(85, 85, 255, 0.5),
+        0 0 calc(40px * var(--scale)) rgba(85, 85, 255, 0.3),
+        inset 0 0 calc(15px * var(--scale)) rgba(0, 0, 0, 0.5);
     transform-origin: center center;
+    flex-shrink: 0;
 }
 
 #header {
-    width: calc(var(--game-width) * var(--scale));
+    width: var(--game-width);
     background: linear-gradient(180deg, #000088 0%, #000044 100%);
     color: #55FFFF;
-    font-size: calc(16px * var(--scale));
+    font-size: calc(14px * var(--scale));
     font-weight: bold;
-    padding: calc(10px * var(--scale)) calc(15px * var(--scale));
+    padding: calc(8px * var(--scale)) calc(12px * var(--scale));
     display: flex;
     justify-content: space-between;
     font-family: 'Courier New', monospace;
-    letter-spacing: calc(2px * var(--scale));
+    letter-spacing: calc(1px * var(--scale));
     border: calc(2px * var(--scale)) solid #5555FF;
     border-bottom: none;
     border-radius: calc(4px * var(--scale)) calc(4px * var(--scale)) 0 0;
@@ -89,46 +96,50 @@ body {
     top: 50%;
 }
 
+#header .version {
+    color: #55FF55;
+    font-size: calc(12px * var(--scale));
+    text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
+}
+
 #game-canvas {
     display: block;
     background-color: #0000AA;
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     border: calc(2px * var(--scale)) solid #5555FF;
-    width: calc(var(--game-width) * var(--scale));
-    height: calc(var(--game-height) * var(--scale));
 }
 
 #message {
-    width: calc(var(--game-width) * var(--scale));
+    width: var(--game-width);
     background: linear-gradient(180deg, #000044 0%, #000088 100%);
     color: #FFFF55;
-    font-size: calc(18px * var(--scale));
+    font-size: calc(14px * var(--scale));
     font-weight: bold;
     text-align: center;
-    padding: calc(12px * var(--scale));
-    min-height: calc(44px * var(--scale));
+    padding: calc(8px * var(--scale));
+    min-height: calc(32px * var(--scale));
     font-family: 'Courier New', monospace;
-    letter-spacing: calc(3px * var(--scale));
+    letter-spacing: calc(2px * var(--scale));
     border: calc(2px * var(--scale)) solid #5555FF;
     border-top: none;
-    text-shadow: calc(2px * var(--scale)) calc(2px * var(--scale)) 0 #000000;
+    text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
     border-radius: 0 0 calc(4px * var(--scale)) calc(4px * var(--scale));
 }
 
 #instructions {
     color: #55FFFF;
-    font-size: calc(11px * var(--scale));
+    font-size: calc(10px * var(--scale));
     text-align: center;
-    padding: calc(10px * var(--scale));
+    padding: calc(6px * var(--scale)) calc(8px * var(--scale));
     font-family: 'Courier New', monospace;
-    max-width: calc(var(--game-width) * var(--scale));
-    line-height: 1.5;
+    max-width: var(--game-width);
+    line-height: 1.4;
     text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
 }
 
 #instructions p {
-    margin: calc(3px * var(--scale)) 0;
+    margin: calc(2px * var(--scale)) 0;
 }
 
 /* Death reason overlay */
@@ -188,4 +199,27 @@ body {
     position: relative;
     display: flex;
     flex-direction: column;
+}
+
+/* Copyright notice */
+#copyright {
+    width: var(--game-width);
+    display: flex;
+    justify-content: flex-end;
+    gap: calc(8px * var(--scale));
+    padding: calc(4px * var(--scale)) calc(8px * var(--scale));
+    font-family: 'Courier New', monospace;
+    font-size: calc(10px * var(--scale));
+    color: #888888;
+    text-shadow: calc(1px * var(--scale)) calc(1px * var(--scale)) 0 #000000;
+}
+
+#copyright span:first-child {
+    color: #666666;
+}
+
+#copyright .refactor {
+    color: #55FFFF;
+    font-size: calc(8px * var(--scale));
+    opacity: 0.8;
 }

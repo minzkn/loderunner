@@ -3953,44 +3953,218 @@
             osc.stop(ctx.currentTime + duration);
         }
 
+        // 노이즈 생성 (효과음용)
+        noise(duration, vol = 0.05) {
+            if (!this.enabled || !this.audioCtx) return;
+
+            const ctx = this.audioCtx;
+            const bufferSize = ctx.sampleRate * duration;
+            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * vol;
+            }
+
+            const source = ctx.createBufferSource();
+            const gain = ctx.createGain();
+            source.buffer = buffer;
+            source.connect(gain);
+            gain.connect(ctx.destination);
+            gain.gain.value = vol;
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+            source.start();
+        }
+
+        // 주파수 스윕 (떨어지는 효과 등)
+        sweep(startFreq, endFreq, duration, type = 'square', vol = 0.1) {
+            if (!this.enabled || !this.audioCtx) return;
+
+            const ctx = this.audioCtx;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            osc.type = type;
+            osc.frequency.setValueAtTime(startFreq, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(endFreq, ctx.currentTime + duration);
+            gain.gain.value = vol;
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+
+            osc.start();
+            osc.stop(ctx.currentTime + duration);
+        }
+
         play(type) {
             if (!this.audioCtx) return;
 
             switch (type) {
+                // 금괴 획득 - 밝은 상승음
                 case 'gold':
-                    this.beep(880, 0.08);
-                    setTimeout(() => this.beep(1100, 0.08), 40);
-                    setTimeout(() => this.beep(1320, 0.1), 80);
+                    this.beep(880, 0.08, 'square', 0.08);
+                    setTimeout(() => this.beep(1100, 0.08, 'square', 0.08), 40);
+                    setTimeout(() => this.beep(1320, 0.12, 'sine', 0.1), 80);
                     break;
+
+                // 땅 파기 - 거친 굴착음
                 case 'dig':
-                    this.beep(150, 0.06, 'sawtooth');
-                    this.beep(100, 0.06, 'sawtooth');
+                    this.noise(0.08, 0.15);
+                    this.beep(150, 0.06, 'sawtooth', 0.12);
+                    setTimeout(() => {
+                        this.noise(0.06, 0.1);
+                        this.beep(100, 0.06, 'sawtooth', 0.1);
+                    }, 60);
                     break;
+
+                // 구멍 복구 - 블록이 채워지는 소리
+                case 'fill':
+                    this.beep(200, 0.08, 'square', 0.08);
+                    setTimeout(() => this.beep(250, 0.1, 'square', 0.1), 50);
+                    this.noise(0.1, 0.08);
+                    break;
+
+                // 적이 함정에 빠짐
+                case 'trap':
+                    this.sweep(400, 150, 0.2, 'sawtooth', 0.12);
+                    setTimeout(() => this.beep(100, 0.1, 'square', 0.1), 150);
+                    break;
+
+                // 적 리스폰
+                case 'respawn':
+                    this.beep(200, 0.08, 'sine', 0.06);
+                    setTimeout(() => this.beep(300, 0.08, 'sine', 0.06), 80);
+                    setTimeout(() => this.beep(400, 0.1, 'sine', 0.08), 160);
+                    break;
+
+                // 플레이어 낙하 (봉에서 떨어지기 등)
                 case 'fall':
-                    this.beep(300, 0.1);
-                    setTimeout(() => this.beep(200, 0.1), 50);
+                    this.sweep(500, 200, 0.15, 'triangle', 0.1);
                     break;
+
+                // 발걸음 (걷기)
+                case 'step':
+                    this.beep(80 + Math.random() * 40, 0.03, 'square', 0.03);
+                    break;
+
+                // 사다리 오르기
+                case 'climb':
+                    this.beep(220 + Math.random() * 60, 0.04, 'triangle', 0.04);
+                    break;
+
+                // 바에서 이동
+                case 'bar':
+                    this.beep(300 + Math.random() * 50, 0.03, 'sine', 0.03);
+                    break;
+
+                // 플레이어 사망
                 case 'die':
-                    this.beep(440, 0.12);
-                    setTimeout(() => this.beep(350, 0.12), 120);
-                    setTimeout(() => this.beep(280, 0.15), 240);
-                    setTimeout(() => this.beep(220, 0.2), 360);
+                    this.sweep(600, 100, 0.4, 'sawtooth', 0.15);
+                    setTimeout(() => this.beep(80, 0.3, 'square', 0.1), 300);
                     break;
+
+                // 탈출 사다리 등장
                 case 'escape':
-                    for (let i = 0; i < 4; i++) {
-                        setTimeout(() => this.beep(523 * (1 + i * 0.25), 0.1), i * 80);
+                    for (let i = 0; i < 6; i++) {
+                        setTimeout(() => this.beep(400 + i * 100, 0.08, 'sine', 0.08), i * 60);
                     }
                     break;
+
+                // 레벨 클리어
                 case 'levelup':
-                    this.beep(523, 0.1);
-                    setTimeout(() => this.beep(659, 0.1), 100);
-                    setTimeout(() => this.beep(784, 0.1), 200);
-                    setTimeout(() => this.beep(1047, 0.2), 300);
+                    const notes = [523, 587, 659, 784, 880, 1047];
+                    notes.forEach((freq, i) => {
+                        setTimeout(() => this.beep(freq, 0.12, 'sine', 0.1), i * 80);
+                    });
+                    setTimeout(() => {
+                        this.beep(1047, 0.3, 'sine', 0.12);
+                        this.beep(784, 0.3, 'sine', 0.08);
+                        this.beep(523, 0.3, 'sine', 0.06);
+                    }, 500);
                     break;
+
+                // 게임 시작
                 case 'start':
-                    this.beep(440, 0.1);
-                    setTimeout(() => this.beep(550, 0.1), 100);
-                    setTimeout(() => this.beep(660, 0.15), 200);
+                    this.beep(330, 0.1, 'square', 0.08);
+                    setTimeout(() => this.beep(392, 0.1, 'square', 0.08), 100);
+                    setTimeout(() => this.beep(523, 0.15, 'square', 0.1), 200);
+                    setTimeout(() => this.beep(659, 0.2, 'sine', 0.12), 350);
+                    break;
+
+                // 일시정지
+                case 'pause':
+                    this.beep(440, 0.1, 'sine', 0.08);
+                    setTimeout(() => this.beep(330, 0.15, 'sine', 0.06), 100);
+                    break;
+
+                // 재개
+                case 'resume':
+                    this.beep(330, 0.1, 'sine', 0.06);
+                    setTimeout(() => this.beep(440, 0.15, 'sine', 0.08), 100);
+                    break;
+
+                // 게임 오버
+                case 'gameover':
+                    this.sweep(400, 100, 0.5, 'sawtooth', 0.12);
+                    setTimeout(() => this.beep(80, 0.3, 'square', 0.08), 400);
+                    setTimeout(() => this.beep(60, 0.4, 'square', 0.06), 600);
+                    break;
+
+                // 스턱 (클리어 불가)
+                case 'stuck':
+                    this.beep(200, 0.15, 'square', 0.1);
+                    setTimeout(() => this.beep(150, 0.15, 'square', 0.1), 200);
+                    setTimeout(() => this.beep(100, 0.2, 'sawtooth', 0.1), 400);
+                    break;
+
+                // 타이틀 화면 음악
+                case 'title':
+                    const melody = [
+                        { freq: 330, dur: 0.15 },
+                        { freq: 392, dur: 0.15 },
+                        { freq: 523, dur: 0.15 },
+                        { freq: 659, dur: 0.3 }
+                    ];
+                    let time = 0;
+                    melody.forEach(note => {
+                        setTimeout(() => this.beep(note.freq, note.dur, 'sine', 0.08), time);
+                        time += note.dur * 800;
+                    });
+                    break;
+
+                // 데모 모드 전환
+                case 'demo':
+                    this.beep(523, 0.08, 'sine', 0.06);
+                    setTimeout(() => this.beep(659, 0.08, 'sine', 0.06), 100);
+                    setTimeout(() => this.beep(523, 0.12, 'sine', 0.08), 200);
+                    break;
+
+                // 적 처치 (구멍에서 죽음)
+                case 'kill':
+                    this.sweep(300, 80, 0.2, 'sawtooth', 0.1);
+                    setTimeout(() => this.noise(0.1, 0.1), 150);
+                    break;
+
+                // Championship 모드 시작
+                case 'championship':
+                    this.beep(392, 0.1, 'square', 0.08);
+                    setTimeout(() => this.beep(523, 0.1, 'square', 0.08), 120);
+                    setTimeout(() => this.beep(659, 0.1, 'square', 0.08), 240);
+                    setTimeout(() => this.beep(784, 0.2, 'sine', 0.1), 360);
+                    setTimeout(() => this.beep(1047, 0.3, 'sine', 0.12), 500);
+                    break;
+
+                // 적 금괴 드롭
+                case 'drop':
+                    this.beep(600, 0.06, 'triangle', 0.06);
+                    setTimeout(() => this.beep(400, 0.08, 'triangle', 0.05), 60);
+                    break;
+
+                // 적 금괴 픽업
+                case 'pickup':
+                    this.beep(400, 0.06, 'triangle', 0.05);
+                    setTimeout(() => this.beep(500, 0.06, 'triangle', 0.06), 50);
                     break;
             }
         }
@@ -4068,14 +4242,22 @@
 
         setupResponsiveCanvas() {
             const resize = () => {
-                const maxWidth = window.innerWidth - 60;
-                const maxHeight = window.innerHeight - 200;
+                // Small margin from viewport edges
+                const margin = 12;
+                const viewportWidth = window.innerWidth - margin * 2;
+                const viewportHeight = window.innerHeight - margin * 2;
 
-                // Calculate scale to fit screen
-                const scaleX = maxWidth / BASE_WIDTH;
-                const scaleY = maxHeight / BASE_HEIGHT;
+                // UI overhead (all proportional to scale):
+                // header: ~30px, message: ~32px, instructions: ~40px, container padding: ~26px
+                // Total overhead base: ~128px (at scale 1)
+                const uiOverheadBase = 100;
+                const containerPadding = 26;
+
+                // Calculate scale to fit both width and height
+                const scaleX = viewportWidth / (BASE_WIDTH + containerPadding);
+                const scaleY = viewportHeight / (BASE_HEIGHT + uiOverheadBase + containerPadding);
                 SCALE = Math.min(scaleX, scaleY);
-                SCALE = Math.max(0.8, Math.min(SCALE, 3.0));
+                SCALE = Math.max(0.5, Math.min(SCALE, 2.5));
 
                 // Apply device pixel ratio for crisp rendering
                 const dpr = window.devicePixelRatio || 1;
@@ -4206,6 +4388,7 @@
                             if (this.lives <= 0) {
                                 this.gameState = STATE.GAME_OVER;
                                 this.showMessage('GAME OVER - PRESS ENTER');
+                                this.sound.play('gameover');
                             } else {
                                 this.loadLevel(this.currentLevel);
                                 this.gameState = STATE.PLAYING;
@@ -4214,15 +4397,18 @@
                         } else if (this.gameState === STATE.PLAYING) {
                             this.gameState = STATE.PAUSED;
                             this.showMessage('PAUSED');
+                            this.sound.play('pause');
                         } else if (this.gameState === STATE.PAUSED) {
                             this.gameState = STATE.PLAYING;
                             this.showMessage('');
+                            this.sound.play('resume');
                         }
                     }
 
                     if (key === 'ESC' && this.gameState === STATE.PLAYING) {
                         this.gameState = STATE.PAUSED;
                         this.showMessage('PAUSED');
+                        this.sound.play('pause');
                     }
 
                     if (key === 'RESTART' && (this.gameState === STATE.PLAYING || this.gameState === STATE.STUCK)) {
@@ -4232,6 +4418,7 @@
                         if (this.lives <= 0) {
                             this.gameState = STATE.GAME_OVER;
                             this.showMessage('GAME OVER - PRESS ENTER');
+                            this.sound.play('gameover');
                         } else {
                             this.loadLevel(this.currentLevel);
                             this.gameState = STATE.PLAYING;
@@ -4274,35 +4461,14 @@
             if (!this.demoMode || this.gameState !== STATE.PLAYING) return;
 
             this.demoMoveTimer++;
-            if (this.demoMoveTimer < 3) return;  // 느리게 움직임
+            if (this.demoMoveTimer < 2) return;
             this.demoMoveTimer = 0;
 
             const p = this.player;
             const px = Math.floor(p.x + 0.5);
             const py = Math.floor(p.y + 0.5);
 
-            // 간단한 AI: 가장 가까운 금을 찾아 이동
-            let nearestGold = null;
-            let nearestDist = Infinity;
-
-            for (let y = 0; y < LEVEL_HEIGHT; y++) {
-                for (let x = 0; x < LEVEL_WIDTH; x++) {
-                    if (this.getTile(x, y) === TILE.GOLD) {
-                        const dist = Math.abs(x - px) + Math.abs(y - py);
-                        if (dist < nearestDist) {
-                            nearestDist = dist;
-                            nearestGold = { x, y };
-                        }
-                    }
-                }
-            }
-
-            // 탈출 사다리가 활성화되면 위로
-            if (this.escapeLadderActive) {
-                nearestGold = { x: px, y: 0 };
-            }
-
-            // 키 시뮬레이션
+            // 키 초기화
             this.keys.LEFT = false;
             this.keys.RIGHT = false;
             this.keys.UP = false;
@@ -4310,33 +4476,273 @@
             this.keys.DIGL = false;
             this.keys.DIGR = false;
 
-            if (nearestGold) {
-                const dx = nearestGold.x - px;
-                const dy = nearestGold.y - py;
+            // 낙하 중이면 아무것도 하지 않음
+            if (p.vy > 0.1) return;
 
-                // 수직 이동 우선 (사다리 있을 때)
-                if (dy < 0 && (this.isLadder(px, py) || this.isLadder(px, py - 1))) {
-                    this.keys.UP = true;
-                } else if (dy > 0 && (this.isLadder(px, py) || this.isLadder(px, py + 1))) {
-                    this.keys.DOWN = true;
-                } else if (dx < 0) {
-                    this.keys.LEFT = true;
-                    // 앞에 벽돌이 있고 아래가 비어있으면 파기
-                    if (this.getTile(px - 1, py + 1) === TILE.BRICK && !this.isSolid(px - 1, py)) {
-                        if (Math.random() < 0.1) this.keys.DIGL = true;
+            const onLadder = this.isLadder(px, py);
+            const onBar = this.isBar(px, py);
+            const hasFloor = this.isSolid(px, py + 1) || this.isLadder(px, py + 1) || onLadder;
+
+            // === 적 분석 ===
+            const nearbyEnemies = [];
+            for (const e of this.enemies) {
+                if (e.trapped > 0) continue;
+                const ex = Math.floor(e.x + 0.5);
+                const ey = Math.floor(e.y + 0.5);
+                const dist = Math.abs(ex - px) + Math.abs(ey - py);
+                nearbyEnemies.push({ e, ex, ey, dist, dx: ex - px, dy: ey - py });
+            }
+            nearbyEnemies.sort((a, b) => a.dist - b.dist);
+
+            // 같은 층의 가장 가까운 적
+            const sameLevelEnemy = nearbyEnemies.find(en => en.ey === py);
+            // 전체 가장 가까운 적
+            const closestEnemy = nearbyEnemies[0];
+
+            // === 함정 전략 ===
+            // 적이 같은 층에서 접근 중이면 함정 파기
+            if (sameLevelEnemy && sameLevelEnemy.dist <= 6 && hasFloor) {
+                const enemyDir = sameLevelEnemy.dx < 0 ? -1 : 1; // 적이 있는 방향
+                const digX = px + enemyDir;
+                const digY = py + 1;
+
+                // 파기 가능한 벽돌 확인
+                const canDigTrap = digX >= 0 && digX < LEVEL_WIDTH &&
+                    !this.isSolid(digX, py) &&
+                    (this.getTile(digX, digY) === TILE.BRICK || this.getTile(digX, digY) === TILE.TRAP);
+
+                // 적이 2-4칸 거리일 때 함정 파기 (타이밍)
+                if (canDigTrap && sameLevelEnemy.dist >= 2 && sameLevelEnemy.dist <= 4) {
+                    if (enemyDir < 0) this.keys.DIGL = true;
+                    else this.keys.DIGR = true;
+                    // 파고 나서 반대 방향으로 도망갈 준비
+                    return;
+                }
+
+                // 적이 매우 가까우면 (1-2칸) 일단 도망
+                if (sameLevelEnemy.dist <= 2) {
+                    const escapeDir = -enemyDir; // 적 반대 방향
+
+                    // 도망갈 수 있는지 확인
+                    const canEscapeHorizontal = !this.isSolid(px + escapeDir, py);
+                    const canEscapeUp = onLadder && !this.isSolid(px, py - 1);
+                    const canEscapeDown = (onLadder || this.isLadder(px, py + 1)) && !this.isSolid(px, py + 1);
+
+                    // 함정이 이미 파져있으면 적을 유인
+                    const holeInEnemyPath = this.dugHoles.some(h =>
+                        h.x === px + enemyDir && h.y === py + 1
+                    );
+
+                    if (holeInEnemyPath && canEscapeHorizontal) {
+                        // 적이 함정에 빠질 때까지 대기하다 도망
+                        if (sameLevelEnemy.dist <= 1) {
+                            if (escapeDir < 0) this.keys.LEFT = true;
+                            else this.keys.RIGHT = true;
+                        }
+                        return;
                     }
-                } else if (dx > 0) {
-                    this.keys.RIGHT = true;
-                    if (this.getTile(px + 1, py + 1) === TILE.BRICK && !this.isSolid(px + 1, py)) {
-                        if (Math.random() < 0.1) this.keys.DIGR = true;
+
+                    // 도망 우선순위: 수평 > 위 > 아래
+                    if (canEscapeHorizontal) {
+                        if (escapeDir < 0) this.keys.LEFT = true;
+                        else this.keys.RIGHT = true;
+
+                        // 도망가면서 함정 파기
+                        if (canDigTrap) {
+                            if (enemyDir < 0) this.keys.DIGL = true;
+                            else this.keys.DIGR = true;
+                        }
+                        return;
+                    } else if (canEscapeUp) {
+                        this.keys.UP = true;
+                        return;
+                    } else if (canEscapeDown) {
+                        this.keys.DOWN = true;
+                        return;
+                    }
+                }
+
+                // 적 방향에 이미 파진 구멍이 있으면 유인 (적을 향해 이동)
+                const existingHole = this.dugHoles.find(h => {
+                    const holeDir = h.x - px;
+                    return h.y === py + 1 &&
+                           ((enemyDir < 0 && holeDir < 0) || (enemyDir > 0 && holeDir > 0)) &&
+                           Math.abs(holeDir) <= 2;
+                });
+
+                if (existingHole && sameLevelEnemy.dist > 2) {
+                    // 구멍 바로 옆에 서서 적을 유인
+                    const holeEdgeX = existingHole.x - enemyDir;
+                    if (px !== holeEdgeX) {
+                        if (holeEdgeX < px) this.keys.LEFT = true;
+                        else this.keys.RIGHT = true;
+                        return;
                     }
                 }
             }
 
-            // 랜덤하게 파기 (교착 방지)
-            if (Math.random() < 0.02) {
-                if (Math.random() < 0.5) this.keys.DIGL = true;
-                else this.keys.DIGR = true;
+            // === 적이 아래에서 사다리로 올라오면 미리 함정 준비 ===
+            if (closestEnemy && closestEnemy.dy > 0 && closestEnemy.dist <= 5) {
+                // 적이 올라올 사다리 근처에 함정 파기
+                const ladderX = closestEnemy.ex;
+                if (Math.abs(ladderX - px) <= 2 && py === closestEnemy.ey - closestEnemy.dy) {
+                    const digDir = ladderX < px ? -1 : 1;
+                    const digX = px + digDir;
+                    const digY = py + 1;
+                    if ((this.getTile(digX, digY) === TILE.BRICK || this.getTile(digX, digY) === TILE.TRAP) &&
+                        !this.isSolid(digX, py)) {
+                        if (digDir < 0) this.keys.DIGL = true;
+                        else this.keys.DIGR = true;
+                        return;
+                    }
+                }
+            }
+
+            // === BFS로 금괴/탈출 경로 찾기 ===
+            const visited = new Map();
+            const queue = [{ x: px, y: py, path: [] }];
+            visited.set(`${px},${py}`, true);
+
+            let targetPath = null;
+            const isEscaping = this.escapeLadderActive;
+
+            while (queue.length > 0 && !targetPath) {
+                const current = queue.shift();
+                const { x, y, path } = current;
+
+                // 목표 확인
+                if (isEscaping) {
+                    if (y === 0 && this.getTile(x, y) === TILE.ESCAPE_LADDER) {
+                        targetPath = path;
+                        break;
+                    }
+                } else {
+                    if (this.getTile(x, y) === TILE.GOLD) {
+                        targetPath = path;
+                        break;
+                    }
+                }
+
+                const currOnLadder = this.isLadder(x, y);
+                const currOnBar = this.isBar(x, y);
+                const currHasFloor = this.isSolid(x, y + 1) || this.isLadder(x, y + 1) || currOnLadder;
+
+                const moves = [];
+                if (x > 0 && !this.isSolid(x - 1, y) && (currHasFloor || currOnBar || currOnLadder)) {
+                    moves.push({ x: x - 1, y, action: 'LEFT' });
+                }
+                if (x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y) && (currHasFloor || currOnBar || currOnLadder)) {
+                    moves.push({ x: x + 1, y, action: 'RIGHT' });
+                }
+                if (y > 0 && !this.isSolid(x, y - 1) && (currOnLadder || this.isLadder(x, y - 1))) {
+                    moves.push({ x, y: y - 1, action: 'UP' });
+                }
+                if (y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
+                    if (currOnLadder || this.isLadder(x, y + 1) || currOnBar) {
+                        moves.push({ x, y: y + 1, action: 'DOWN' });
+                    }
+                }
+                if (!currHasFloor && !currOnBar && y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
+                    moves.push({ x, y: y + 1, action: 'FALL' });
+                }
+
+                for (const move of moves) {
+                    const key = `${move.x},${move.y}`;
+                    if (!visited.has(key)) {
+                        visited.set(key, true);
+                        queue.push({ x: move.x, y: move.y, path: [...path, move.action] });
+                    }
+                }
+            }
+
+            // 경로 따라 이동 (적이 없거나 먼 경우)
+            if (targetPath && targetPath.length > 0) {
+                // 적이 경로에 있는지 확인
+                let pathBlocked = false;
+                if (closestEnemy && closestEnemy.dist <= 3) {
+                    const nextAction = targetPath[0];
+                    const nextX = px + (nextAction === 'LEFT' ? -1 : nextAction === 'RIGHT' ? 1 : 0);
+                    const nextY = py + (nextAction === 'UP' ? -1 : nextAction === 'DOWN' ? 1 : 0);
+
+                    for (const en of nearbyEnemies) {
+                        if (Math.abs(en.ex - nextX) <= 1 && Math.abs(en.ey - nextY) <= 1) {
+                            pathBlocked = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!pathBlocked) {
+                    const action = targetPath[0];
+                    if (action === 'LEFT') this.keys.LEFT = true;
+                    else if (action === 'RIGHT') this.keys.RIGHT = true;
+                    else if (action === 'UP') this.keys.UP = true;
+                    else if (action === 'DOWN') this.keys.DOWN = true;
+                    return;
+                }
+            }
+
+            // === 도달 불가능한 금괴를 위해 파기 ===
+            if (!isEscaping) {
+                for (let gy = 0; gy < LEVEL_HEIGHT; gy++) {
+                    for (let gx = 0; gx < LEVEL_WIDTH; gx++) {
+                        if (this.getTile(gx, gy) === TILE.GOLD && !visited.has(`${gx},${gy}`)) {
+                            if (gy > py) {
+                                const leftDigX = px - 1;
+                                const rightDigX = px + 1;
+                                const digY = py + 1;
+
+                                if (leftDigX >= 0 && !this.isSolid(leftDigX, py) &&
+                                    (this.getTile(leftDigX, digY) === TILE.BRICK || this.getTile(leftDigX, digY) === TILE.TRAP)) {
+                                    this.keys.DIGL = true;
+                                    return;
+                                }
+                                if (rightDigX < LEVEL_WIDTH && !this.isSolid(rightDigX, py) &&
+                                    (this.getTile(rightDigX, digY) === TILE.BRICK || this.getTile(rightDigX, digY) === TILE.TRAP)) {
+                                    this.keys.DIGR = true;
+                                    return;
+                                }
+                            }
+                            if (gx < px && !this.isSolid(px - 1, py)) this.keys.LEFT = true;
+                            else if (gx > px && !this.isSolid(px + 1, py)) this.keys.RIGHT = true;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // === 공격적 함정 전략: 적이 없으면 적극적으로 유인 ===
+            if (closestEnemy && closestEnemy.dist > 6 && closestEnemy.dist <= 12) {
+                // 적을 향해 이동하며 함정 위치 선점
+                const dirToEnemy = closestEnemy.dx < 0 ? -1 : 1;
+
+                // 좋은 함정 위치 찾기 (적 방향에 벽돌이 있는 곳)
+                for (let checkX = px; Math.abs(checkX - px) <= 4; checkX += dirToEnemy) {
+                    const brickBelow = this.getTile(checkX + dirToEnemy, py + 1);
+                    if ((brickBelow === TILE.BRICK || brickBelow === TILE.TRAP) &&
+                        !this.isSolid(checkX + dirToEnemy, py)) {
+                        // 이 위치로 이동
+                        if (checkX !== px) {
+                            if (dirToEnemy < 0) this.keys.LEFT = true;
+                            else this.keys.RIGHT = true;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // === 랜덤 이동 (교착 방지) ===
+            if (Math.random() < 0.4) {
+                const moves = [];
+                if (!this.isSolid(px - 1, py) && hasFloor) moves.push('LEFT');
+                if (!this.isSolid(px + 1, py) && hasFloor) moves.push('RIGHT');
+                if (onLadder && !this.isSolid(px, py - 1)) moves.push('UP');
+                if ((onLadder || this.isLadder(px, py + 1)) && !this.isSolid(px, py + 1)) moves.push('DOWN');
+
+                if (moves.length > 0) {
+                    const action = moves[Math.floor(Math.random() * moves.length)];
+                    this.keys[action] = true;
+                }
             }
         }
 
@@ -4344,9 +4750,11 @@
             if (this.gameMode === 'classic') {
                 this.gameMode = 'championship';
                 this.activeLevels = CHAMPIONSHIP_LEVELS;
+                this.sound.play('championship');
             } else {
                 this.gameMode = 'classic';
                 this.activeLevels = LEVELS;
+                this.sound.play('demo');
             }
             this.loadLevel(1);
             this.updateTitleMessage();
@@ -4375,8 +4783,13 @@
         }
 
         loadLevel(levelNum) {
-            const levels = this.activeLevels || LEVELS;
-            const levelData = levels[(levelNum - 1) % levels.length];
+            const levels = (this.activeLevels && this.activeLevels.length > 0) ? this.activeLevels : LEVELS;
+            if (levels.length === 0) {
+                console.error('No levels available');
+                return;
+            }
+            const levelIndex = ((levelNum - 1) % levels.length + levels.length) % levels.length;
+            const levelData = levels[levelIndex];
 
             this.level = [];
             this.enemies = [];
@@ -4388,6 +4801,7 @@
             this.escapeLadderActive = false;
             this.player = null;
             this.stuckCheckTimer = 0;
+            this.levelStartGrace = 90; // 3 seconds grace period before stuck check
             this.hideDeathOverlay();
 
             for (let y = 0; y < LEVEL_HEIGHT; y++) {
@@ -4511,7 +4925,9 @@
         }
 
         dig(digX, digY) {
-            if (this.getTile(digX, digY) === TILE.BRICK) {
+            // Can dig BRICK and TRAP tiles
+            const tile = this.getTile(digX, digY);
+            if (tile === TILE.BRICK || tile === TILE.TRAP) {
                 this.setTile(digX, digY, TILE.EMPTY);
                 this.dugHoles.push({ x: digX, y: digY, timer: 180 });
                 this.sound.play('dig');
@@ -4584,9 +5000,22 @@
 
         activateEscape() {
             this.escapeLadderActive = true;
+
+            // Find all ladders in the top portion of the level (rows 0-4)
+            // and extend escape ladders from the top down to them
             for (let x = 0; x < LEVEL_WIDTH; x++) {
-                if (this.isLadder(x, 2) || this.isLadder(x, 1)) {
-                    for (let y = 0; y < 2; y++) {
+                // Find the highest ladder in this column (within top 5 rows)
+                let highestLadder = -1;
+                for (let y = 0; y <= 4; y++) {
+                    if (this.isLadder(x, y)) {
+                        highestLadder = y;
+                        break;
+                    }
+                }
+
+                // If there's a ladder in the top area, extend escape ladder from y=0 down to it
+                if (highestLadder >= 0) {
+                    for (let y = 0; y < highestLadder; y++) {
                         if (this.getTile(x, y) === TILE.EMPTY) {
                             this.setTile(x, y, TILE.ESCAPE_LADDER);
                         }
@@ -4642,8 +5071,14 @@
                     p.vy = -speed;
                     p.vx = 0;
                 }
-            } else if (keys.DOWN && (onLadder || this.isLadder(px, py + 1))) {
-                if (!this.isSolid(px, py + 1)) {
+            } else if (keys.DOWN) {
+                if (onLadder || this.isLadder(px, py + 1)) {
+                    if (!this.isSolid(px, py + 1)) {
+                        p.vy = speed;
+                        p.vx = 0;
+                    }
+                } else if (onBar && !this.isSolid(px, py + 1)) {
+                    // Drop from bar with DOWN key (원작 메카닉)
                     p.vy = speed;
                     p.vx = 0;
                 }
@@ -4655,8 +5090,15 @@
             p.x = Math.max(0, Math.min(p.x, LEVEL_WIDTH - 1));
             p.y = Math.max(0, Math.min(p.y, LEVEL_HEIGHT - 1));
 
-            if (p.vx === 0 && p.vy === 0 && onGround && !onLadder) {
-                p.y = Math.round(p.y);
+            // Snap Y position when not on ladder/bar but on solid ground
+            // This prevents floating appearance when stepping off ladders mid-tile
+            if (!onLadder && !onBar && p.vy === 0) {
+                const newPx = Math.floor(p.x + 0.5);
+                const newPy = Math.floor(p.y + 0.5);
+                const newOnGround = this.isSolid(newPx, newPy + 1) || this.isLadder(newPx, newPy + 1);
+                if (newOnGround) {
+                    p.y = Math.round(p.y);
+                }
             }
 
             // Digging
@@ -4665,7 +5107,10 @@
                 const digX = px + digDir;
                 const digY = py + 1;
 
-                if ((onGround || onLadder || onBar) && !this.isSolid(px + digDir, py)) {
+                // Validate dig position and conditions
+                if ((onGround || onLadder || onBar) &&
+                    digX >= 0 && digX < LEVEL_WIDTH && digY >= 0 && digY < LEVEL_HEIGHT &&
+                    !this.isSolid(px + digDir, py)) {
                     this.dig(digX, digY);
                 }
                 keys.DIGL = false;
@@ -4676,10 +5121,33 @@
 
             if (p.vx !== 0 || p.vy !== 0) {
                 p.frame = (p.frame + 1) % 8;
+
+                // Play movement sounds every 4 frames
+                if (p.frame % 4 === 0) {
+                    if (onBar) {
+                        this.sound.play('bar');
+                    } else if (onLadder && p.vy !== 0) {
+                        this.sound.play('climb');
+                    } else if (onGround && p.vx !== 0) {
+                        this.sound.play('step');
+                    }
+                }
             }
 
-            if (p.y <= 0 && this.escapeLadderActive) {
-                this.levelComplete();
+            // Play fall sound when dropping from bar
+            if (!onGround && !onLadder && !onBar && p.vy > 0 && !p.wasFalling) {
+                this.sound.play('fall');
+            }
+            p.wasFalling = (!onGround && !onLadder && !onBar && p.vy > 0);
+
+            // Level complete when player reaches top of the level with escape ladder active
+            // Check: player is at top row (y < 0.5) OR player is on escape ladder at row 0
+            if (this.escapeLadderActive) {
+                const atTop = p.y < 0.5;
+                const onEscapeLadder = this.getTile(px, 0) === TILE.ESCAPE_LADDER && py === 0;
+                if (atTop || onEscapeLadder) {
+                    this.levelComplete();
+                }
             }
         }
 
@@ -4714,13 +5182,14 @@
                                     e.y = hole.y;
                                     e.vx = 0;
                                     e.vy = 0;
-                                    this.sound.play('fall');
+                                    this.sound.play('trap');
                                     caughtInHole = true;
                                     this.score += 100;  // 원작: 적 함정에 빠뜨리기 100점
                                     this.updateUI();
 
                                     if (e.hasGold) {
                                         e.hasGold = false;
+                                        this.sound.play('drop');
                                         if (this.getTile(hole.x, hole.y - 1) === TILE.EMPTY) {
                                             this.setTile(hole.x, hole.y - 1, TILE.GOLD);
                                         }
@@ -4761,86 +5230,141 @@
                 const onLadder = this.isLadder(ex, ey);
                 const onBar = this.isBar(ex, ey);
                 const belowIsLadder = this.isLadder(ex, ey + 1);
-                const onGround = this.isSolid(ex, ey + 1) || onLadder || belowIsLadder;
+                const belowSolid = this.isSolid(ex, ey + 1);
+                const onGround = belowSolid || onLadder || belowIsLadder;
 
                 e.vx = 0;
                 e.vy = 0;
 
+                // Falling check - not on ground, ladder, or bar
                 if (!onGround && !onLadder && !onBar) {
-                    // Falling
                     e.vy = 0.2;
                 } else {
+                    // Chase player
                     const dx = p.x - e.x;
                     const dy = p.y - e.y;
-                    const enemySpeed = 0.08;
+                    const speed = 0.08;
 
-                    const canMoveLeft = ex > 0 && !this.isSolid(ex - 1, ey);
-                    const canMoveRight = ex < LEVEL_WIDTH - 1 && !this.isSolid(ex + 1, ey);
-                    const canMoveUp = ey > 0 && !this.isSolid(ex, ey - 1) && (onLadder || this.isLadder(ex, ey - 1));
-                    const canMoveDown = ey < LEVEL_HEIGHT - 1 && !this.isSolid(ex, ey + 1) && (onLadder || belowIsLadder);
+                    // Movement checks
+                    const canLeft = ex > 0 && !this.isSolid(ex - 1, ey);
+                    const canRight = ex < LEVEL_WIDTH - 1 && !this.isSolid(ex + 1, ey);
+                    const canUp = ey > 0 && !this.isSolid(ex, ey - 1) && (onLadder || this.isLadder(ex, ey - 1));
+                    const canDown = ey < LEVEL_HEIGHT - 1 && !this.isSolid(ex, ey + 1) && (onLadder || belowIsLadder);
 
-                    // Build list of valid moves with priorities
-                    const moves = [];
-
-                    if (canMoveUp) moves.push({ vx: 0, vy: -enemySpeed, priority: dy < 0 ? 10 : 1 });
-                    if (canMoveDown) moves.push({ vx: 0, vy: enemySpeed, priority: dy > 0 ? 10 : 1 });
-                    if (canMoveLeft) moves.push({ vx: -enemySpeed, vy: 0, dir: -1, priority: dx < 0 ? 8 : 2 });
-                    if (canMoveRight) moves.push({ vx: enemySpeed, vy: 0, dir: 1, priority: dx > 0 ? 8 : 2 });
-
-                    if (moves.length > 0) {
-                        // Sort by priority (higher first) and pick the best move
-                        moves.sort((a, b) => b.priority - a.priority);
-
-                        // Add some randomness when priorities are equal to prevent deadlock
-                        const bestPriority = moves[0].priority;
-                        const bestMoves = moves.filter(m => m.priority === bestPriority);
-                        const chosen = bestMoves[Math.floor(Math.random() * bestMoves.length)];
-
-                        e.vx = chosen.vx;
-                        e.vy = chosen.vy;
-                        if (chosen.dir) e.dir = chosen.dir;
-                    }
-
-                    // Special case: on ladder but couldn't move, try harder
-                    if (e.vx === 0 && e.vy === 0 && onLadder) {
-                        // Force movement on ladder
-                        if (canMoveUp && dy <= 0) {
-                            e.vy = -enemySpeed;
-                        } else if (canMoveDown && dy >= 0) {
-                            e.vy = enemySpeed;
-                        } else if (canMoveUp) {
-                            e.vy = -enemySpeed;
-                        } else if (canMoveDown) {
-                            e.vy = enemySpeed;
+                    // Simple AI: prioritize direction toward player
+                    if (onLadder) {
+                        // On ladder - prefer vertical movement
+                        if (dy < -0.5 && canUp) {
+                            e.vy = -speed;
+                        } else if (dy > 0.5 && canDown) {
+                            e.vy = speed;
+                        } else if (dx < -0.5 && canLeft) {
+                            e.vx = -speed;
+                            e.dir = -1;
+                        } else if (dx > 0.5 && canRight) {
+                            e.vx = speed;
+                            e.dir = 1;
+                        } else if (canUp) {
+                            e.vy = -speed;
+                        } else if (canDown) {
+                            e.vy = speed;
                         }
-                    }
+                    } else if (onBar) {
+                        // On bar - move horizontally or drop
+                        if (dy > 1 && !belowSolid && Math.abs(dx) < 2) {
+                            // Drop toward player below
+                            e.vy = 0.2;
+                        } else if (dx < -0.5 && canLeft) {
+                            e.vx = -speed;
+                            e.dir = -1;
+                        } else if (dx > 0.5 && canRight) {
+                            e.vx = speed;
+                            e.dir = 1;
+                        } else if (canLeft) {
+                            e.vx = -speed;
+                            e.dir = -1;
+                        } else if (canRight) {
+                            e.vx = speed;
+                            e.dir = 1;
+                        }
+                    } else if (onGround) {
+                        // On ground - chase player
+                        const sameColumn = Math.abs(dx) < 0.5;
 
-                    // Special case: on bar but couldn't move
-                    if (e.vx === 0 && e.vy === 0 && onBar) {
-                        if (canMoveLeft && dx <= 0) {
-                            e.vx = -enemySpeed;
-                            e.dir = -1;
-                        } else if (canMoveRight && dx >= 0) {
-                            e.vx = enemySpeed;
-                            e.dir = 1;
-                        } else if (canMoveLeft) {
-                            e.vx = -enemySpeed;
-                            e.dir = -1;
-                        } else if (canMoveRight) {
-                            e.vx = enemySpeed;
-                            e.dir = 1;
+                        if (sameColumn && dy !== 0) {
+                            // Same X as player but different floor - need to find ladder
+                            if (dy < 0 && canUp) {
+                                // Player above and can go up
+                                e.vy = -speed;
+                            } else if (dy > 0 && canDown) {
+                                // Player below and can go down
+                                e.vy = speed;
+                            } else {
+                                // Need to move horizontally to find a ladder
+                                // Check which direction has a ladder
+                                let leftLadderDist = 999, rightLadderDist = 999;
+                                for (let searchX = ex - 1; searchX >= 0; searchX--) {
+                                    if (this.isLadder(searchX, ey) || this.isLadder(searchX, ey + 1)) {
+                                        leftLadderDist = ex - searchX;
+                                        break;
+                                    }
+                                    if (this.isSolid(searchX, ey)) break;
+                                }
+                                for (let searchX = ex + 1; searchX < LEVEL_WIDTH; searchX++) {
+                                    if (this.isLadder(searchX, ey) || this.isLadder(searchX, ey + 1)) {
+                                        rightLadderDist = searchX - ex;
+                                        break;
+                                    }
+                                    if (this.isSolid(searchX, ey)) break;
+                                }
+
+                                // Move toward closer ladder
+                                if (leftLadderDist < rightLadderDist && canLeft) {
+                                    e.vx = -speed;
+                                    e.dir = -1;
+                                } else if (rightLadderDist < 999 && canRight) {
+                                    e.vx = speed;
+                                    e.dir = 1;
+                                } else if (canLeft) {
+                                    e.vx = -speed;
+                                    e.dir = -1;
+                                } else if (canRight) {
+                                    e.vx = speed;
+                                    e.dir = 1;
+                                }
+                            }
+                        } else {
+                            // Different X - move horizontally toward player
+                            if (dx < -0.5 && canLeft) {
+                                e.vx = -speed;
+                                e.dir = -1;
+                            } else if (dx > 0.5 && canRight) {
+                                e.vx = speed;
+                                e.dir = 1;
+                            } else if (dy < -0.5 && canUp) {
+                                e.vy = -speed;
+                            } else if (dy > 0.5 && canDown) {
+                                e.vy = speed;
+                            } else if (canLeft) {
+                                e.vx = -speed;
+                                e.dir = -1;
+                            } else if (canRight) {
+                                e.vx = speed;
+                                e.dir = 1;
+                            }
                         }
                     }
                 }
 
+                // Apply movement
                 e.x += e.vx;
                 e.y += e.vy;
 
+                // Clamp to level bounds
                 e.x = Math.max(0, Math.min(e.x, LEVEL_WIDTH - 1));
                 e.y = Math.max(0, Math.min(e.y, LEVEL_HEIGHT - 1));
 
-                // Snap to ground when on solid surface (not on ladder/bar)
-                // Don't snap when trying to move down onto a ladder
+                // Snap Y when on solid ground (not ladder/bar)
                 if (onGround && !onLadder && !onBar && !belowIsLadder && e.vy >= 0) {
                     e.y = Math.round(e.y);
                 }
@@ -4851,6 +5375,7 @@
                         e.hasGold = true;
                         this.setTile(ex, ey, TILE.EMPTY);
                         e.goldPickupCooldown = GOLD_PICKUP_COOLDOWN;
+                        this.sound.play('pickup');
                     }
                 }
                 if (e.goldPickupCooldown > 0) {
@@ -4863,6 +5388,7 @@
                     if (this.getTile(ex, ey) === TILE.EMPTY) {
                         e.hasGold = false;
                         this.setTile(ex, ey, TILE.GOLD);
+                        this.sound.play('drop');
                     }
                 }
 
@@ -4882,6 +5408,7 @@
                         if (Math.floor(e.x + 0.5) === hole.x && Math.floor(e.y + 0.5) === hole.y) {
                             this.score += 100;  // 원작: 적 함정에서 죽음 100점
                             this.updateUI();
+                            this.sound.play('kill');
                             this.respawnEnemy(e);
                         }
                     }
@@ -4892,6 +5419,7 @@
                         this.playerDie();
                     }
 
+                    this.sound.play('fill');
                     this.setTile(hole.x, hole.y, TILE.BRICK);
                     this.dugHoles.splice(i, 1);
                 }
@@ -4928,6 +5456,7 @@
             }
             e.trapped = 0;
             e.goldPickupCooldown = 0;
+            this.sound.play('respawn');
         }
 
         checkCollisions() {
@@ -4940,11 +5469,12 @@
                 const dx = Math.abs(p.x - e.x);
                 const dy = p.y - e.y;
 
-                if (dx < 0.5 && dy > -0.7 && dy < 0.5) {
-                    if (dy > -0.5) {
-                        this.playerDie();
-                        return;
-                    }
+                // Player dies if horizontally close and vertically overlapping
+                // dy > -0.7: enemy is not too far above
+                // dy < 0.5: enemy is not too far below (player can stand on enemy head)
+                if (dx < 0.5 && dy > -0.5 && dy < 0.5) {
+                    this.playerDie();
+                    return;
                 }
             }
         }
@@ -4991,9 +5521,26 @@
         checkStuck() {
             if (this.gameState !== STATE.PLAYING) return;
 
+            // Grace period after level start
+            if (this.levelStartGrace > 0) {
+                this.levelStartGrace--;
+                return;
+            }
+
             const p = this.player;
+            if (!p) return;
+
             const px = Math.floor(p.x + 0.5);
             const py = Math.floor(p.y + 0.5);
+
+            // Don't check stuck if player is falling or moving
+            if (p.vy > 0.1 || Math.abs(p.vx) > 0.1) return;
+
+            // Don't check stuck if there are active digging effects (situation is changing)
+            if (this.diggingEffects.length > 0) return;
+
+            // Don't check stuck if there are active holes (situation may change)
+            if (this.dugHoles.length > 0) return;
 
             // Check if player is trapped in a hole
             if (this.isInHole(p.x, p.y)) {
@@ -5002,27 +5549,23 @@
 
                 for (const hole of this.dugHoles) {
                     if (hole.x === holeX && hole.y === holeY) {
-                        const canClimbUp = !this.isSolid(holeX, holeY - 1);
+                        // Player can't climb up (unlike enemies), only sideways
                         const canMoveLeft = !this.isSolid(holeX - 1, holeY);
                         const canMoveRight = !this.isSolid(holeX + 1, holeY);
 
-                        if (!canClimbUp && !canMoveLeft && !canMoveRight && hole.timer < 90) {
+                        // If can't move sideways and hole will fill soon, player is stuck
+                        if (!canMoveLeft && !canMoveRight && hole.timer < 120) {
                             this.triggerStuck('You are trapped in a hole!<br>Unlike enemies, players cannot climb out of holes.');
                             return;
                         }
                     }
                 }
+                // If in hole but can move sideways, don't check further (player can escape)
+                return;
             }
 
             // Use BFS to find all reachable positions from player
             const reachable = this.findReachablePositions(px, py);
-
-            // Find reachable Y levels (floors)
-            const reachableFloors = new Set();
-            for (const key of reachable) {
-                const [x, y] = key.split(',').map(Number);
-                reachableFloors.add(y);
-            }
 
             // If escape ladder is active, check if player can reach the top
             if (this.escapeLadderActive) {
@@ -5040,7 +5583,7 @@
                 return; // Don't check gold if escape is active
             }
 
-            // Find all remaining gold positions
+            // Find all remaining gold positions (including gold held by enemies)
             const goldPositions = [];
             for (let y = 0; y < LEVEL_HEIGHT; y++) {
                 for (let x = 0; x < LEVEL_WIDTH; x++) {
@@ -5050,6 +5593,17 @@
                 }
             }
 
+            // Count gold held by enemies (they can drop it, so level might still be completable)
+            let enemyHeldGold = 0;
+            for (const e of this.enemies) {
+                if (e.hasGold) enemyHeldGold++;
+            }
+
+            // If no visible gold and enemies have gold, wait for them to drop it
+            if (goldPositions.length === 0 && enemyHeldGold > 0) {
+                return; // Not stuck, just waiting for enemy to drop gold
+            }
+
             if (goldPositions.length === 0) return;
 
             // Check each gold position
@@ -5057,49 +5611,49 @@
             for (const gold of goldPositions) {
                 const key = `${gold.x},${gold.y}`;
                 if (!reachable.has(key)) {
-                    unreachableGold.push(gold);
+                    // Check if we can dig to reach it
+                    let canDigToReach = false;
+
+                    // Check positions above the gold - can we dig down to it?
+                    for (let checkY = gold.y - 1; checkY >= 0; checkY--) {
+                        const aboveKey = `${gold.x},${checkY}`;
+                        if (reachable.has(aboveKey)) {
+                            // Check if there's a diggable path from above to gold
+                            let canDigPath = true;
+                            for (let digY = checkY + 1; digY <= gold.y; digY++) {
+                                const tile = this.getTile(gold.x, digY);
+                                if (tile !== TILE.BRICK && tile !== TILE.TRAP && tile !== TILE.EMPTY && tile !== TILE.GOLD) {
+                                    canDigPath = false;
+                                    break;
+                                }
+                            }
+                            if (canDigPath) {
+                                canDigToReach = true;
+                                break;
+                            }
+                        }
+                        // Stop if we hit a solid tile
+                        if (this.isSolid(gold.x, checkY)) break;
+                    }
+
+                    if (!canDigToReach) {
+                        unreachableGold.push(gold);
+                    }
                 }
             }
 
             if (unreachableGold.length > 0) {
+                // Before declaring stuck, verify it's truly unreachable
+                // (not just temporarily blocked by dug holes that will fill)
                 const gold = unreachableGold[0];
+
+                // If there are active holes, wait for them to fill
+                if (this.dugHoles.length > 0) {
+                    return; // Wait for holes to fill before declaring stuck
+                }
+
                 this.triggerStuck(`A treasure at position (${gold.x + 1}, ${gold.y + 1}) is unreachable!<br>There is no path to collect it.`);
                 return;
-            }
-
-            // Check if player is stuck on current floor with no way to other floors
-            const goldFloors = new Set(goldPositions.map(g => g.y));
-            const canReachAllGoldFloors = [...goldFloors].every(floor => reachableFloors.has(floor));
-
-            if (!canReachAllGoldFloors) {
-                // Find the first unreachable gold floor
-                const unreachableFloor = [...goldFloors].find(floor => !reachableFloors.has(floor));
-                this.triggerStuck(`You cannot reach floor ${unreachableFloor + 1}!<br>There is no ladder to access this floor.`);
-                return;
-            }
-
-            // Check if player can only move horizontally on current floor (no ladders accessible)
-            const minReachableY = Math.min(...reachableFloors);
-            const maxReachableY = Math.max(...reachableFloors);
-
-            // If all gold is above and player can't go up
-            if (goldPositions.length > 0) {
-                const allGoldAbove = goldPositions.every(g => g.y < py);
-                const canGoUp = minReachableY < py;
-
-                if (allGoldAbove && !canGoUp) {
-                    this.triggerStuck('You are stuck on this floor!<br>There is no ladder to reach the treasures above.');
-                    return;
-                }
-
-                // If all gold is below and player can't go down
-                const allGoldBelow = goldPositions.every(g => g.y > py);
-                const canGoDown = maxReachableY > py;
-
-                if (allGoldBelow && !canGoDown) {
-                    this.triggerStuck('You are stuck on this floor!<br>There is no ladder to reach the treasures below.');
-                    return;
-                }
             }
         }
 
@@ -5129,6 +5683,21 @@
             return reachable;
         }
 
+        // Check if position is a dug hole (will become solid again)
+        isDugHole(x, y) {
+            for (const hole of this.dugHoles) {
+                if (hole.x === x && hole.y === y) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // For stuck detection: check if solid OR will become solid (dug hole)
+        isSolidOrWillBe(x, y) {
+            return this.isSolid(x, y) || this.isDugHole(x, y);
+        }
+
         getPossibleMoves(x, y) {
             const moves = [];
 
@@ -5136,7 +5705,8 @@
             const belowTile = this.getTile(x, y + 1);
             const onLadder = currentTile === TILE.LADDER || currentTile === TILE.ESCAPE_LADDER;
             const onBar = currentTile === TILE.BAR;
-            const onGround = this.isSolid(x, y + 1) ||
+            // Consider dug holes as ground (they will fill back up)
+            const onGround = this.isSolidOrWillBe(x, y + 1) ||
                             belowTile === TILE.LADDER ||
                             currentTile === TILE.LADDER ||
                             currentTile === TILE.ESCAPE_LADDER;
@@ -5167,33 +5737,59 @@
                 moves.push({ x, y: y - 1 });
             }
 
-            // Move down (ladder or falling)
+            // Move down (ladder or falling) - but don't intentionally fall into dug holes
             if (y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
-                moves.push({ x, y: y + 1 });
+                // For stuck detection: avoid falling into dug holes (player wouldn't do this)
+                // But allow if there's a ladder or bar below
+                const belowIsHole = this.isDugHole(x, y + 1);
+                const belowHasLadder = this.isLadder(x, y + 1);
+                const belowHasBar = this.isBar(x, y + 1);
+                if (!belowIsHole || belowHasLadder || belowHasBar) {
+                    moves.push({ x, y: y + 1 });
+                }
             }
 
             // Dig left (creates path through brick below-left)
-            // Note: For stuck detection, we assume player CAN dig to reach these positions
+            // Only add if player can escape from the dug position
             if (canMove && x > 0 && !this.isSolid(x - 1, y)) {
                 const digTarget = this.getTile(x - 1, y + 1);
                 if (digTarget === TILE.BRICK || digTarget === TILE.TRAP) {
-                    moves.push({ x: x - 1, y: y + 1 });
+                    // Check if player can escape from the dug hole
+                    // Player can escape if there's an opening to the side
+                    const canEscapeLeft = x > 1 && !this.isSolid(x - 2, y + 1);
+                    const canEscapeRight = !this.isSolid(x, y + 1) || this.isSolid(x, y + 2);
+                    // Also reachable if there's a ladder or bar in the dug position
+                    const hasLadderOrBar = this.isLadder(x - 1, y + 1) || this.isBar(x - 1, y + 1);
+
+                    if (canEscapeLeft || canEscapeRight || hasLadderOrBar) {
+                        moves.push({ x: x - 1, y: y + 1 });
+                    }
+                    // Even if can't escape, the position above the dig (x-1, y) is still reachable
+                    // This is already handled by the "move left" logic
                 }
             }
 
             // Dig right (creates path through brick below-right)
-            // Note: For stuck detection, we assume player CAN dig to reach these positions
+            // Only add if player can escape from the dug position
             if (canMove && x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y)) {
                 const digTarget = this.getTile(x + 1, y + 1);
                 if (digTarget === TILE.BRICK || digTarget === TILE.TRAP) {
-                    moves.push({ x: x + 1, y: y + 1 });
+                    // Check if player can escape from the dug hole
+                    const canEscapeRight = x < LEVEL_WIDTH - 2 && !this.isSolid(x + 2, y + 1);
+                    const canEscapeLeft = !this.isSolid(x, y + 1) || this.isSolid(x, y + 2);
+                    const hasLadderOrBar = this.isLadder(x + 1, y + 1) || this.isBar(x + 1, y + 1);
+
+                    if (canEscapeRight || canEscapeLeft || hasLadderOrBar) {
+                        moves.push({ x: x + 1, y: y + 1 });
+                    }
                 }
             }
 
-            // Special case: if on bar, can fall off by moving to empty space
-            if (onBar) {
-                // Can drop from bar
-                if (!this.isSolid(x, y + 1)) {
+            // Special case: if on bar, can drop off
+            if (onBar && !this.isSolid(x, y + 1)) {
+                // Don't drop into dug holes (same check as regular down movement)
+                const belowIsHole = this.isDugHole(x, y + 1);
+                if (!belowIsHole) {
                     moves.push({ x, y: y + 1 });
                 }
             }
@@ -5206,7 +5802,7 @@
 
             this.gameState = STATE.STUCK;
             this.stuckReason = reason;
-            this.sound.play('die');
+            this.sound.play('stuck');
             this.showDeathOverlay('LEVEL IMPOSSIBLE!', reason);
         }
 
@@ -5793,6 +6389,18 @@
                 const legOffset1 = (anim === 0 || anim === 2 ? 0 : (anim === 1 ? 0.12 : -0.12)) * T;
                 const legOffset2 = -legOffset1;
 
+                // Golden aura when carrying gold
+                if (e.hasGold) {
+                    const glowPulse = 0.3 + 0.2 * Math.sin(this.frameCount * 0.15);
+                    ctx.save();
+                    ctx.shadowColor = '#FFD700';
+                    ctx.shadowBlur = s(15);
+                    ctx.fillStyle = `rgba(255, 215, 0, ${glowPulse})`;
+                    this.drawRoundRect(px + T * 0.15, py + T * 0.05, T * 0.7, T * 0.85, s(6));
+                    ctx.fill();
+                    ctx.restore();
+                }
+
                 // Shadow
                 ctx.fillStyle = 'rgba(0,0,0,0.4)';
                 this.drawRoundRect(px + T * 0.2, py + T * 0.92, T * 0.6, T * 0.06, s(2));
@@ -5837,6 +6445,22 @@
                 ctx.fill();
                 this.drawRoundRect(px + T * 0.77 + armSwing, py + T * 0.58, T * 0.15, T * 0.12, s(2));
                 ctx.fill();
+
+                // Gold nugget in hand when carrying gold
+                if (e.hasGold) {
+                    const goldGrad = this.createRadialGradient(
+                        px + T * 0.85 + armSwing, py + T * 0.52,
+                        0, T * 0.12,
+                        '#FFFF00', '#DAA520'
+                    );
+                    this.drawRoundRect(px + T * 0.78 + armSwing, py + T * 0.45, T * 0.18, T * 0.15, s(3));
+                    ctx.fillStyle = goldGrad;
+                    ctx.fill();
+                    // Gold shine
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                    this.drawCircle(px + T * 0.82 + armSwing, py + T * 0.48, T * 0.03);
+                    ctx.fill();
+                }
 
                 // === HEAD ===
                 // Helmet
@@ -5908,6 +6532,7 @@
                         } else if (this.lives <= 0) {
                             this.gameState = STATE.GAME_OVER;
                             this.showMessage('GAME OVER - PRESS ENTER');
+                            this.sound.play('gameover');
                         } else {
                             this.loadLevel(this.currentLevel);
                             this.gameState = STATE.PLAYING;
