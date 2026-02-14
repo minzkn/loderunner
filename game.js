@@ -5334,7 +5334,7 @@
 
             // Movement
             p.vx = 0;
-            const speed = 0.18;
+            const speed = 0.14;
 
             if (keys.LEFT && !this.isSolid(px - 1, py)) {
                 if (onGround || onLadder || onBar || onTrappedEntity || p.vy > 0) {
@@ -5529,7 +5529,7 @@
                     // Chase player
                     const dx = p.x - e.x;
                     const dy = p.y - e.y;
-                    const speed = 0.08;
+                    const speed = 0.06;
 
                     // Movement checks
                     const canLeft = ex > 0 && !this.isSolid(ex - 1, ey);
