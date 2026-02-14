@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#000022">
     <title>Lode Runner (1983) - VGA Edition</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -24,7 +27,7 @@
             <div id="sound-toggle" title="Toggle Sound (S)">
                 <span id="sound-icon">🔊</span>
             </div>
-            <div class="version">v0.1</div>
+            <div class="version">v0.2</div>
         </div>
         <div id="canvas-wrapper">
             <canvas id="game-canvas"></canvas>
@@ -45,6 +48,26 @@
                 <span class="key-item" data-key="RIGHT">▶</span>
                 <span class="key-item" data-key="DIGL">DIG-L</span>
                 <span class="key-item" data-key="DIGR">DIG-R</span>
+            </div>
+        </div>
+        <!-- Mobile Touch Controls -->
+        <div id="mobile-controls">
+            <div id="dpad">
+                <button id="btn-up" data-key="UP">▲</button>
+                <div class="dpad-row">
+                    <button id="btn-left" data-key="LEFT">◀</button>
+                    <button id="btn-down" data-key="DOWN">▼</button>
+                    <button id="btn-right" data-key="RIGHT">▶</button>
+                </div>
+            </div>
+            <div id="action-buttons">
+                <button id="btn-digl" data-key="DIGL">DIG L</button>
+                <button id="btn-digr" data-key="DIGR">DIG R</button>
+            </div>
+            <div id="system-buttons">
+                <button id="btn-pause" data-key="ESC">❚❚</button>
+                <button id="btn-enter" data-key="ENTER">ENTER</button>
+                <button id="btn-restart" data-key="RESTART">↻</button>
             </div>
         </div>
         <div id="copyright">

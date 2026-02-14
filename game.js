@@ -4192,6 +4192,7 @@
             this.deathReason = document.getElementById('death-reason');
 
             this.keys = {};
+            this.keySource = {};  // Track input source: 'keyboard' or 'touch'
             this.gameState = STATE.TITLE;
             this.score = 0;
             this.lives = 5;
@@ -4245,6 +4246,22 @@
             this.setupInput();
             this.setupResponsiveCanvas();
             this.sound.setupToggle();
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    this.wasPlayingBeforeHidden = this.gameState === STATE.PLAYING;
+                    if (this.wasPlayingBeforeHidden) {
+                        this.gameState = STATE.PAUSED;
+                        this.showMessage('PAUSED');
+                    }
+                } else {
+                    if (this.wasPlayingBeforeHidden && this.gameState === STATE.PAUSED) {
+                        this.gameState = STATE.PLAYING;
+                        this.showMessage('');
+                    }
+                }
+            });
+
             this.showTitle();
             this.gameLoop();
         }
@@ -4384,7 +4401,7 @@
                 }
             };
 
-            const handleKey = (e, isDown) => {
+            const handleKey = (e, isDown, source = 'keyboard') => {
                 if (e.isComposing || e.keyCode === 229) return;
 
                 // Update user input time (demo timer reset)
@@ -4394,7 +4411,15 @@
 
                 const key = keyCodeMap[e.keyCode];
                 if (key) {
+                    // Prioritize newer input source
+                    if (isDown) {
+                        this.keySource[key] = source;
+                    } else if (this.keySource[key] !== source) {
+                        // Another source still has this key pressed, don't release
+                        return;
+                    }
                     this.keys[key] = isDown;
+                    if (!isDown) delete this.keySource[key];
                     e.preventDefault();
                     // Update key display
                     updateKeyDisplay(key, isDown);
@@ -4473,6 +4498,117 @@
 
             document.addEventListener('keydown', (e) => handleKey(e, true));
             document.addEventListener('keyup', (e) => handleKey(e, false));
+
+            this.setupTouchControls();
+        }
+
+        setupTouchControls() {
+            const buttons = document.querySelectorAll('#mobile-controls button');
+            if (!buttons.length) return;
+
+            const keyActionMap = {
+                'LEFT': null, 'UP': null, 'RIGHT': null, 'DOWN': null,
+                'DIGL': null, 'DIGR': null,
+                'ENTER': () => this.handleEnterKey(),
+                'RESTART': () => this.handleRestartKey(),
+                'ESC': () => this.handlePauseKey()
+            };
+
+            const keyCodeMap = {
+                'LEFT': 37, 'UP': 38, 'RIGHT': 39, 'DOWN': 40,
+                'DIGL': 90, 'DIGR': 88,
+                'ENTER': 13, 'RESTART': 82, 'ESC': 27
+            };
+
+            buttons.forEach(btn => {
+                const key = btn.dataset.key;
+                if (!key) return;
+
+                const handlePress = (e) => {
+                    e.preventDefault();
+                    // Prioritize touch input over keyboard
+                    this.keySource[key] = 'touch';
+                    this.keys[key] = true;
+                    this.lastInputTime = this.frameCount;
+                    this.sound.init();
+                    btn.classList.add('pressed');
+
+                    if (keyActionMap[key]) {
+                        keyActionMap[key]();
+                    }
+                };
+
+                const handleRelease = (e) => {
+                    e.preventDefault();
+                    // Only release if this is the active source
+                    if (this.keySource[key] === 'touch') {
+                        delete this.keySource[key];
+                        this.keys[key] = false;
+                    }
+                    btn.classList.remove('pressed');
+                };
+
+                btn.addEventListener('touchstart', handlePress, { passive: false });
+                btn.addEventListener('touchend', handleRelease, { passive: false });
+                btn.addEventListener('touchcancel', handleRelease, { passive: false });
+                btn.addEventListener('mousedown', handlePress);
+                btn.addEventListener('mouseup', handleRelease);
+                btn.addEventListener('mouseleave', handleRelease);
+            });
+        }
+
+        handleEnterKey() {
+            if (this.demoMode) {
+                this.demoMode = false;
+                this.showTitle();
+                return;
+            }
+            if (this.gameState === STATE.TITLE || this.gameState === STATE.GAME_OVER) {
+                this.startGame();
+            } else if (this.gameState === STATE.STUCK) {
+                this.handleDeath();
+            } else if (this.gameState === STATE.PLAYING) {
+                this.gameState = STATE.PAUSED;
+                this.showMessage('PAUSED');
+                this.sound.play('pause');
+            } else if (this.gameState === STATE.PAUSED) {
+                this.gameState = STATE.PLAYING;
+                this.showMessage('');
+                this.sound.play('resume');
+            }
+        }
+
+        handleDeath() {
+            this.hideDeathOverlay();
+            this.lives--;
+            this.updateUI();
+            if (this.lives <= 0) {
+                this.gameState = STATE.GAME_OVER;
+                this.showMessage('GAME OVER - PRESS ENTER');
+                this.sound.play('gameover');
+            } else {
+                this.loadLevel(this.currentLevel);
+                this.gameState = STATE.PLAYING;
+                this.showMessage('');
+            }
+        }
+
+        handleRestartKey() {
+            if (this.gameState === STATE.PLAYING || this.gameState === STATE.STUCK) {
+                this.handleDeath();
+            }
+        }
+
+        handlePauseKey() {
+            if (this.gameState === STATE.PLAYING) {
+                this.gameState = STATE.PAUSED;
+                this.showMessage('PAUSED');
+                this.sound.play('pause');
+            } else if (this.gameState === STATE.PAUSED) {
+                this.gameState = STATE.PLAYING;
+                this.showMessage('');
+                this.sound.play('resume');
+            }
         }
 
         showTitle() {
@@ -5572,6 +5708,8 @@
             this.currentLevel++;
             this.score += 2000;  // 원작: 레벨 클리어 2000점
             this.lives++;
+            this.goldCollected = 0;  // 다음 레벨을 위해 초기화
+            this.escapeLadderActive = false;
             this.updateUI();
             this.showMessage('LEVEL ' + this.currentLevel);
             this.sound.play('levelup');

@@ -4,6 +4,7 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
 }
 
 :root {
@@ -16,6 +17,10 @@ html, body {
     width: 100%;
     height: 100%;
     overflow: hidden;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 body {
@@ -252,4 +257,126 @@ body {
     color: #55FFFF;
     font-size: calc(7px * var(--scale));
     opacity: 0.8;
+}
+
+/* Mobile Touch Controls */
+#mobile-controls {
+    display: none;
+    width: var(--game-width);
+    padding: calc(8px * var(--scale));
+    gap: calc(10px * var(--scale));
+    justify-content: space-between;
+    align-items: center;
+}
+
+#dpad {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: calc(2px * var(--scale));
+}
+
+#dpad .dpad-row {
+    display: flex;
+    gap: calc(2px * var(--scale));
+}
+
+#mobile-controls button {
+    width: calc(48px * var(--scale));
+    height: calc(48px * var(--scale));
+    background: linear-gradient(180deg, #444466 0%, #222244 100%);
+    border: calc(2px * var(--scale)) solid #6666AA;
+    border-radius: calc(8px * var(--scale));
+    color: #AAAACC;
+    font-size: calc(16px * var(--scale));
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#mobile-controls button:active,
+#mobile-controls button.pressed {
+    background: linear-gradient(180deg, #FFFF55 0%, #FFAA00 100%);
+    border-color: #FFFF88;
+    color: #000000;
+    transform: scale(0.95);
+}
+
+#action-buttons {
+    display: flex;
+    gap: calc(8px * var(--scale));
+}
+
+#action-buttons button {
+    width: calc(60px * var(--scale));
+    background: linear-gradient(180deg, #884444 0%, #442222 100%);
+    border-color: #AA6666;
+}
+
+#system-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: calc(6px * var(--scale));
+}
+
+#system-buttons button {
+    width: calc(44px * var(--scale));
+    height: calc(44px * var(--scale));
+    font-size: calc(14px * var(--scale));
+}
+
+#btn-enter {
+    background: linear-gradient(180deg, #448844 0%, #224422 100%);
+    border-color: #66AA66;
+}
+
+#btn-pause {
+    background: linear-gradient(180deg, #888844 0%, #444422 100%);
+    border-color: #AAAA66;
+}
+
+#btn-restart {
+    background: linear-gradient(180deg, #664488 0%, #332244 100%);
+    border-color: #8866AA;
+}
+
+/* Show mobile controls on touch devices */
+@media (pointer: coarse), (max-width: 700px) {
+    #mobile-controls {
+        display: flex;
+        padding: calc(12px * var(--scale));
+    }
+    
+    #instructions {
+        display: none;
+    }
+    
+    #copyright {
+        display: none;
+    }
+    
+    #game-container {
+        max-width: 100vw;
+        max-height: 100vh;
+        margin: 0;
+    }
+    
+    #header, #game-canvas, #message {
+        max-width: 100%;
+    }
+
+    #header {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: calc(4px * var(--scale));
+    }
+    
+    #mobile-controls {
+        justify-content: center;
+    }
 }
