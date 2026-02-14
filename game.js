@@ -5037,7 +5037,7 @@
                             this.goldCount++;
                             break;
                         case 'P':
-                            this.player = { x: x, y: y, vx: 0, vy: 0, frame: 0, dir: 1 };
+                            this.player = { x: x, y: y, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0 };
                             break;
                         case 'E':
                             this.enemies.push({
@@ -5055,7 +5055,7 @@
             }
 
             if (!this.player) {
-                this.player = { x: 1, y: LEVEL_HEIGHT - 2, vx: 0, vy: 0, frame: 0, dir: 1 };
+                this.player = { x: 1, y: LEVEL_HEIGHT - 2, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0 };
             }
 
             this.updateUI();
@@ -5096,6 +5096,12 @@
         }
 
         isHoleOccupied(holeX, holeY, excludeEnemy) {
+            // Check if player is trapped in this hole
+            if (this.player && this.player.trapped > 0 &&
+                Math.floor(this.player.x) === holeX && Math.floor(this.player.y) === holeY) {
+                return true;
+            }
+            // Check if any enemy is trapped in this hole
             for (const e of this.enemies) {
                 if (e !== excludeEnemy && e.trapped > 0 &&
                     Math.floor(e.x) === holeX && Math.floor(e.y) === holeY) {
@@ -5103,6 +5109,25 @@
                 }
             }
             return false;
+        }
+
+        // Check if there's a trapped entity (player or enemy) at tile that can be walked on
+        getTrappedEntityAtTile(tileX, tileY) {
+            // Check for trapped player first
+            if (this.player && this.player.trapped > 0) {
+                const playerTileX = Math.floor(this.player.x);
+                const playerTileY = Math.floor(this.player.y);
+                if (playerTileX === tileX && playerTileY === tileY) {
+                    return this.player;
+                }
+            }
+            // Then check for trapped enemies
+            return this.getTrappedEnemyAtTile(tileX, tileY);
+        }
+
+        // Check if player is trapped in a hole
+        isPlayerTrapped() {
+            return this.player && this.player.trapped > 0;
         }
 
         getEnemyAt(x, y) {
@@ -5249,18 +5274,61 @@
             const onLadder = this.isLadder(px, py);
             const onBar = this.isBar(px, py);
             const onGround = this.isSolid(px, py + 1) || this.isLadder(px, py) || this.isLadder(px, py + 1);
-            // Check for trapped enemy below player (can walk on their head)
-            // Use tile coordinates (px, py + 1) to match onGround check
-            const onTrappedEnemy = this.getTrappedEnemyAtTile(px, py + 1);
+            
+            // Check for trapped entity (player or enemy) below player - can walk on their head
+            const onTrappedEntity = this.getTrappedEntityAtTile(px, py + 1);
+
+            // Check if player is in a hole
+            if (p.trapped > 0) {
+                p.trapped--;
+                const holeX = Math.floor(p.x);
+                const holeY = Math.floor(p.y);
+                
+                // Lock player in hole position
+                p.x = holeX + 0.5;
+                p.vx = 0;
+                p.vy = 0;
+
+                // Try to escape after some time (unlike enemies, players can't climb out)
+                // They need to wait for hole to fill or be helped by enemy
+                // For now, player dies if trapped - this is original Lode Runner behavior
+                if (p.trapped <= 0) {
+                    // Player escapes when hole fills - same as original
+                    p.trapped = 0;
+                }
+                // Don't process normal movement when trapped
+                return;
+            }
+
+            // Check if player falls into a trap/hole
+            if (!onGround && !onLadder && !onBar && p.vy > 0) {
+                const checkX = Math.floor(p.x + 0.5);
+                const checkY = Math.floor(p.y + 0.5);
+                
+                for (const hole of this.dugHoles) {
+                    if (hole.x === checkX && hole.y === checkY) {
+                        // Only trap if hole is not already occupied
+                        if (!this.isHoleOccupied(hole.x, hole.y, null)) {
+                            p.trapped = 180; // 6 seconds at 30fps
+                            p.x = hole.x + 0.5;
+                            p.y = hole.y;
+                            p.vx = 0;
+                            p.vy = 0;
+                            this.sound.play('trap');
+                            break;
+                        }
+                    }
+                }
+            }
 
             // Gravity
-            if (!onGround && !onLadder && !onBar && !onTrappedEnemy) {
+            if (!onGround && !onLadder && !onBar && !onTrappedEntity) {
                 p.vy = 0.25;
             } else {
                 p.vy = 0;
-                // Snap to enemy head when standing on trapped enemy
-                if (onTrappedEnemy && !onGround && !onLadder && !onBar) {
-                    p.y = Math.floor(onTrappedEnemy.y) - 1;
+                // Snap to trapped entity head when standing on them
+                if (onTrappedEntity && !onGround && !onLadder && !onBar) {
+                    p.y = Math.floor(onTrappedEntity.y) - 1;
                 }
             }
 
@@ -5269,12 +5337,12 @@
             const speed = 0.18;
 
             if (keys.LEFT && !this.isSolid(px - 1, py)) {
-                if (onGround || onLadder || onBar || onTrappedEnemy || p.vy > 0) {
+                if (onGround || onLadder || onBar || onTrappedEntity || p.vy > 0) {
                     p.vx = -speed;
                     p.dir = -1;
                 }
             } else if (keys.RIGHT && !this.isSolid(px + 1, py)) {
-                if (onGround || onLadder || onBar || onTrappedEnemy || p.vy > 0) {
+                if (onGround || onLadder || onBar || onTrappedEntity || p.vy > 0) {
                     p.vx = speed;
                     p.dir = 1;
                 }
@@ -5446,12 +5514,16 @@
                 const belowIsLadder = this.isLadder(ex, ey + 1);
                 const belowSolid = this.isSolid(ex, ey + 1);
                 const onGround = belowSolid || onLadder || belowIsLadder;
+                
+                // Check for trapped player or enemy below (can walk on their head)
+                const onTrappedEntity = this.getTrappedEntityAtTile(ex, ey + 1);
+                const onTrappedBelow = onTrappedEntity !== null;
 
                 e.vx = 0;
                 e.vy = 0;
 
-                // Falling check - not on ground, ladder, or bar
-                if (!onGround && !onLadder && !onBar) {
+                // Falling check - not on ground, ladder, bar, or trapped entity
+                if (!onGround && !onLadder && !onBar && !onTrappedBelow) {
                     e.vy = 0.2;
                 } else {
                     // Chase player
@@ -5466,8 +5538,8 @@
                     const canDown = ey < LEVEL_HEIGHT - 1 && !this.isSolid(ex, ey + 1) && (onLadder || belowIsLadder);
 
                     // Simple AI: prioritize direction toward player
-                    if (onLadder) {
-                        // On ladder - prefer vertical movement
+                    if (onLadder || onTrappedBelow) {
+                        // On ladder or trapped entity - prefer vertical movement
                         if (dy < -0.5 && canUp) {
                             e.vy = -speed;
                         } else if (dy > 0.5 && canDown) {
@@ -5501,8 +5573,8 @@
                             e.vx = speed;
                             e.dir = 1;
                         }
-                    } else if (onGround) {
-                        // On ground - chase player
+                    } else if (onGround || onTrappedBelow) {
+                        // On ground or trapped entity - chase player
                         const sameColumn = Math.abs(dx) < 0.5;
 
                         if (sameColumn && dy !== 0) {
@@ -5578,9 +5650,14 @@
                 e.x = Math.max(0, Math.min(e.x, LEVEL_WIDTH - 1));
                 e.y = Math.max(0, Math.min(e.y, LEVEL_HEIGHT - 1));
 
-                // Snap Y when on solid ground (not ladder/bar)
-                if (onGround && !onLadder && !onBar && !belowIsLadder && e.vy >= 0) {
+                // Snap Y when on solid ground or trapped entity (not ladder/bar)
+                if ((onGround || onTrappedBelow) && !onLadder && !onBar && !belowIsLadder && e.vy >= 0) {
                     e.y = Math.round(e.y);
+                }
+
+                // Snap to trapped entity head when standing on it
+                if (onTrappedBelow && onTrappedEntity) {
+                    e.y = Math.floor(onTrappedEntity.y) - 1;
                 }
 
                 // Gold pickup with cooldown (goldPickupCooldown initialized in loadLevel)
@@ -5676,6 +5753,24 @@
         checkCollisions() {
             const p = this.player;
 
+            // Skip collision check if player is trapped in a hole (enemies can walk on player's head)
+            if (p.trapped > 0) {
+                // But enemies can still attack player in hole
+                for (const e of this.enemies) {
+                    if (e.trapped > 0) continue; // Skip trapped enemies
+                    
+                    const dx = Math.abs(p.x - e.x);
+                    const dy = p.y - e.y;
+                    
+                    // Enemy can attack player in hole if close enough
+                    if (dx < 0.7 && dy > -0.3 && dy < 0.7) {
+                        this.playerDie();
+                        return;
+                    }
+                }
+                return;
+            }
+
             for (const e of this.enemies) {
                 // Skip collision if enemy is trapped (player can walk on their head)
                 if (e.trapped > 0) continue;
@@ -5755,13 +5850,16 @@
             // Don't check stuck if player is falling or moving
             if (p.vy > 0.1 || Math.abs(p.vx) > 0.1) return;
 
+            // Don't check stuck if player is trapped in a hole (they'll die or escape)
+            if (p.trapped > 0) return;
+
             // Don't check stuck if there are active digging effects (situation is changing)
             if (this.diggingEffects.length > 0) return;
 
             // Don't check stuck if there are active holes (situation may change)
             if (this.dugHoles.length > 0) return;
 
-            // Check if player is trapped in a hole
+            // Check if player is trapped in a hole (legacy check, kept for compatibility)
             if (this.isInHole(p.x, p.y)) {
                 const holeX = Math.floor(p.x);
                 const holeY = Math.floor(p.y);
