@@ -32,25 +32,31 @@
         ESCAPE_LADDER: 7
     };
 
-    // VGA 256-color palette style
+    // Apple II original color palette (1983)
     const COLORS = {
         BLACK: '#000000',
-        DARKBLUE: '#0000AA',
-        DARKGREEN: '#00AA00',
-        DARKCYAN: '#00AAAA',
-        DARKRED: '#AA0000',
-        DARKMAGENTA: '#AA00AA',
-        BROWN: '#AA5500',
-        LIGHTGRAY: '#AAAAAA',
-        DARKGRAY: '#555555',
-        BLUE: '#5555FF',
-        GREEN: '#55FF55',
-        CYAN: '#55FFFF',
-        RED: '#FF5555',
-        MAGENTA: '#FF55FF',
-        YELLOW: '#FFFF55',
-        WHITE: '#FFFFFF'
+        WHITE: '#FFFFFF',
+        RED: '#FF0000',
+        GREEN: '#00FF00',
+        ORANGE: '#FF8800',
+        PURPLE: '#AA00FF',
+        CYAN: '#00AAAA',
+        YELLOW: '#FFFF00',
+        BROWN: '#8B4513',
+        LIGHT_RED: '#FF0000',
+        DARK_GRAY: '#444444',
+        GRAY: '#888888',
+        LIGHT_GREEN: '#00FF00',
+        LIGHT_BLUE: '#00AAAA',
+        LIGHT_GRAY: '#AAAAAA',
+        BLUE: '#0000AA'
     };
+
+    // Animation frames for smoother movement
+    const PLAYER_ANIM_FRAMES = 8;
+    const ENEMY_ANIM_FRAMES = 8;
+    const GOLD_ANIM_SPEED = 0.15;
+    const TRAP_PULSE_SPEED = 0.3;
 
     // Gameplay constants
     const ENEMY_COLLISION_RADIUS = 0.6;
@@ -61,6 +67,17 @@
     const DEATH_DELAY_FRAMES = 45;   // ~1500ms at 30fps
     const LEVEL_COMPLETE_DELAY_FRAMES = 60; // ~2000ms at 30fps
 
+    // Hole/Trap timing constants (30fps - original Apple II ~60fps scaled)
+    // Original Apple II: ~5 seconds at 60fps = 300 frames, ~7 seconds at 60fps = 420 frames
+    // At 30fps: 150 frames (~5 seconds), 210 frames (~7 seconds)
+    const ENEMY_TRAPPED_TIME = 150;     // time enemy stays trapped in hole (~5 seconds)
+    const ENEMY_TRAPPED_ESCAPE = 60;    // frames remaining when enemy starts escape attempt (~2 seconds)
+    const HOLE_FILL_TIME = 210;         // time until hole fills (~7 seconds - original Apple II)
+
+    // Movement speed constants
+    const PLAYER_SPEED = 0.14;
+    const ROPE_SPEED_MULTIPLIER = 1.15; // Rope movement is ~15% faster (speedrun exploit)
+
     // Game states
     const STATE = {
         TITLE: 0,
@@ -69,7 +86,8 @@
         DYING: 3,
         LEVEL_COMPLETE: 4,
         GAME_OVER: 5,
-        STUCK: 6
+        STUCK: 6,
+        EDITOR: 7
     };
 
     // ============================================
@@ -4001,101 +4019,100 @@
             if (!this.audioCtx) return;
 
             switch (type) {
-                // 금괴 획득 - 밝은 상승음
+                // 금괴 획득 - C64 스타일의 밝은 상승음
                 case 'gold':
-                    this.beep(880, 0.08, 'square', 0.08);
-                    setTimeout(() => this.beep(1100, 0.08, 'square', 0.08), 40);
-                    setTimeout(() => this.beep(1320, 0.12, 'sine', 0.1), 80);
+                    this.beep(880, 0.06, 'square', 0.1);
+                    setTimeout(() => this.beep(1320, 0.08, 'square', 0.1), 50);
+                    setTimeout(() => this.beep(1760, 0.15, 'square', 0.12), 100);
                     break;
 
-                // 땅 파기 - 거친 굴착음
+                // 땅 파기 - C64 스타일의 거친 굴착음
                 case 'dig':
-                    this.noise(0.08, 0.15);
-                    this.beep(150, 0.06, 'sawtooth', 0.12);
+                    this.noise(0.05, 0.25);
+                    this.noise(0.03, 0.2);
                     setTimeout(() => {
-                        this.noise(0.06, 0.1);
-                        this.beep(100, 0.06, 'sawtooth', 0.1);
-                    }, 60);
+                        this.noise(0.04, 0.18);
+                    }, 40);
                     break;
 
-                // 구멍 복구 - 블록이 채워지는 소리
+                // 구멍 복구 - C64 스타일
                 case 'fill':
-                    this.beep(200, 0.08, 'square', 0.08);
-                    setTimeout(() => this.beep(250, 0.1, 'square', 0.1), 50);
-                    this.noise(0.1, 0.08);
+                    this.beep(150, 0.06, 'square', 0.12);
+                    setTimeout(() => this.beep(200, 0.08, 'square', 0.1), 40);
+                    setTimeout(() => this.beep(250, 0.1, 'square', 0.08), 80);
                     break;
 
                 // 적이 함정에 빠짐
                 case 'trap':
-                    this.sweep(400, 150, 0.2, 'sawtooth', 0.12);
-                    setTimeout(() => this.beep(100, 0.1, 'square', 0.1), 150);
+                    this.sweep(300, 100, 0.25, 'sawtooth', 0.15);
+                    setTimeout(() => this.noise(0.15, 0.1), 200);
                     break;
 
                 // 적 리스폰
                 case 'respawn':
-                    this.beep(200, 0.08, 'sine', 0.06);
-                    setTimeout(() => this.beep(300, 0.08, 'sine', 0.06), 80);
-                    setTimeout(() => this.beep(400, 0.1, 'sine', 0.08), 160);
+                    this.beep(200, 0.06, 'square', 0.08);
+                    setTimeout(() => this.beep(400, 0.06, 'square', 0.08), 60);
+                    setTimeout(() => this.beep(600, 0.1, 'square', 0.1), 120);
                     break;
 
                 // 플레이어 낙하 (봉에서 떨어지기 등)
                 case 'fall':
-                    this.sweep(500, 200, 0.15, 'triangle', 0.1);
+                    this.sweep(400, 150, 0.2, 'square', 0.12);
                     break;
 
                 // 발걸음 (걷기)
                 case 'step':
-                    this.beep(80 + Math.random() * 40, 0.03, 'square', 0.03);
+                    this.beep(100 + Math.random() * 50, 0.025, 'square', 0.04);
                     break;
 
                 // 사다리 오르기
                 case 'climb':
-                    this.beep(220 + Math.random() * 60, 0.04, 'triangle', 0.04);
+                    this.beep(200 + Math.random() * 40, 0.035, 'square', 0.05);
                     break;
 
                 // 바에서 이동
                 case 'bar':
-                    this.beep(300 + Math.random() * 50, 0.03, 'sine', 0.03);
+                    this.beep(250 + Math.random() * 30, 0.025, 'square', 0.04);
                     break;
 
-                // 플레이어 사망
+                // 플레이어 사망 - C64 스타일
                 case 'die':
-                    this.sweep(600, 100, 0.4, 'sawtooth', 0.15);
-                    setTimeout(() => this.beep(80, 0.3, 'square', 0.1), 300);
+                    this.sweep(500, 50, 0.5, 'sawtooth', 0.2);
+                    setTimeout(() => this.noise(0.3, 0.15), 400);
                     break;
 
-                // 탈출 사다리 등장
+                // 탈출 사다리 등장 - C64 스타일
                 case 'escape':
-                    for (let i = 0; i < 6; i++) {
-                        setTimeout(() => this.beep(400 + i * 100, 0.08, 'sine', 0.08), i * 60);
+                    for (let i = 0; i < 8; i++) {
+                        setTimeout(() => this.beep(440 + i * 110, 0.05, 'square', 0.08), i * 40);
                     }
                     break;
 
-                // 레벨 클리어
+                // 레벨 클리어 - C64 스타일 멜로디
                 case 'levelup':
-                    const notes = [523, 587, 659, 784, 880, 1047];
+                    const notes = [523, 659, 784, 1047, 1319, 1568];
                     notes.forEach((freq, i) => {
-                        setTimeout(() => this.beep(freq, 0.12, 'sine', 0.1), i * 80);
+                        setTimeout(() => this.beep(freq, 0.1, 'square', 0.1), i * 60);
                     });
                     setTimeout(() => {
-                        this.beep(1047, 0.3, 'sine', 0.12);
-                        this.beep(784, 0.3, 'sine', 0.08);
-                        this.beep(523, 0.3, 'sine', 0.06);
-                    }, 500);
+                        this.beep(1568, 0.2, 'square', 0.12);
+                        this.beep(1319, 0.2, 'square', 0.1);
+                        this.beep(1047, 0.3, 'square', 0.1);
+                    }, 400);
                     break;
 
-                // 게임 시작
+                // 게임 시작 - C64 스타일
                 case 'start':
-                    this.beep(330, 0.1, 'square', 0.08);
-                    setTimeout(() => this.beep(392, 0.1, 'square', 0.08), 100);
-                    setTimeout(() => this.beep(523, 0.15, 'square', 0.1), 200);
-                    setTimeout(() => this.beep(659, 0.2, 'sine', 0.12), 350);
+                    this.beep(220, 0.08, 'square', 0.1);
+                    setTimeout(() => this.beep(330, 0.08, 'square', 0.1), 80);
+                    setTimeout(() => this.beep(440, 0.1, 'square', 0.1), 160);
+                    setTimeout(() => this.beep(660, 0.2, 'square', 0.12), 280);
                     break;
 
                 // 일시정지
                 case 'pause':
-                    this.beep(440, 0.1, 'sine', 0.08);
-                    setTimeout(() => this.beep(330, 0.15, 'sine', 0.06), 100);
+                    this.beep(440, 0.1, 'square', 0.08);
+                    setTimeout(() => this.beep(330, 0.15, 'square', 0.06), 100);
                     break;
 
                 // 재개
@@ -4118,18 +4135,22 @@
                     setTimeout(() => this.beep(100, 0.2, 'sawtooth', 0.1), 400);
                     break;
 
-                // 타이틀 화면 음악
+                // 타이틀 화면 음악 - C64 스타일
                 case 'title':
-                    const melody = [
-                        { freq: 330, dur: 0.15 },
-                        { freq: 392, dur: 0.15 },
-                        { freq: 523, dur: 0.15 },
-                        { freq: 659, dur: 0.3 }
+                    const titleNotes = [
+                        { freq: 220, dur: 0.12 },
+                        { freq: 330, dur: 0.12 },
+                        { freq: 440, dur: 0.12 },
+                        { freq: 330, dur: 0.12 },
+                        { freq: 440, dur: 0.12 },
+                        { freq: 550, dur: 0.24 },
+                        { freq: 440, dur: 0.12 },
+                        { freq: 550, dur: 0.24 }
                     ];
-                    let time = 0;
-                    melody.forEach(note => {
-                        setTimeout(() => this.beep(note.freq, note.dur, 'sine', 0.08), time);
-                        time += note.dur * 800;
+                    let titleTime = 0;
+                    titleNotes.forEach(note => {
+                        setTimeout(() => this.beep(note.freq, note.dur, 'square', 0.08), titleTime);
+                        titleTime += note.dur * 700;
                     });
                     break;
 
@@ -4197,6 +4218,7 @@
             this.score = 0;
             this.lives = 5;
             this.currentLevel = 1;
+            this.speedMultiplier = 1.0;  // C64: increases after completing all 150 levels
 
             this.level = [];
             this.player = null;
@@ -4225,6 +4247,10 @@
             // Game mode (classic or championship)
             this.gameMode = 'classic';  // 'classic' or 'championship'
             this.activeLevels = LEVELS;
+
+            // Editor mode
+            this.editorTile = TILE.BRICK;
+            this.editorLevel = this.createEmptyLevel();
 
             // Demo mode
             this.demoMode = false;
@@ -4317,6 +4343,26 @@
 
             window.addEventListener('resize', resize);
             resize();
+
+            // Editor mouse click handler
+            this.canvas.addEventListener('mousedown', (e) => {
+                if (this.gameState !== STATE.EDITOR) return;
+                
+                const rect = this.canvas.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                
+                const tileX = Math.floor(clickX / TILE_SIZE);
+                const tileY = Math.floor(clickY / TILE_SIZE);
+                
+                if (tileX >= 0 && tileX < LEVEL_WIDTH && tileY >= 0 && tileY < LEVEL_HEIGHT) {
+                    // Border tiles cannot be changed
+                    if (tileX === 0 || tileX === LEVEL_WIDTH - 1 || tileY === 0 || tileY === LEVEL_HEIGHT - 1) {
+                        return;
+                    }
+                    this.editorLevel[tileY][tileX] = this.editorTile;
+                }
+            });
         }
 
         // Vector graphics helper functions
@@ -4429,6 +4475,18 @@
                 if (isDown && e.keyCode === 67 && this.gameState === STATE.TITLE) {
                     this.toggleGameMode();
                     e.preventDefault();
+                }
+
+                // 'E' key to toggle editor mode
+                if (isDown && e.keyCode === 69) {
+                    this.toggleEditor();
+                    e.preventDefault();
+                }
+
+                // Editor mode keyboard controls
+                if (this.gameState === STATE.EDITOR) {
+                    this.handleEditorInput(e, isDown);
+                    return;
                 }
 
                 // 'M' key to toggle sound
@@ -4618,6 +4676,10 @@
             this.activeLevels = this.gameMode === 'championship' ? CHAMPIONSHIP_LEVELS : LEVELS;
             this.loadLevel(1);
             this.updateTitleMessage();
+            // Play title music
+            if (this.sound) {
+                this.sound.play('title');
+            }
         }
 
         updateTitleMessage() {
@@ -4682,7 +4744,7 @@
 
             const onLadder = this.isLadder(px, py);
             const onBar = this.isBar(px, py);
-            const hasFloor = this.isSolid(px, py + 1) || this.isLadder(px, py + 1) || onLadder;
+            const hasFloor = this.isSolidForPlayer(px, py + 1) || this.isLadder(px, py + 1) || onLadder || this.isDugHole(px, py + 1);
             const isEscaping = this.escapeLadderActive;
 
             // === 교착 해결: 강제로 파기 또는 새로운 방향 ===
@@ -4712,7 +4774,7 @@
                 if (!this.isSolid(px - 1, py) && (hasFloor || onBar)) escapeOptions.push('LEFT');
                 if (!this.isSolid(px + 1, py) && (hasFloor || onBar)) escapeOptions.push('RIGHT');
                 if ((onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1)) escapeOptions.push('UP');
-                if ((onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1)) escapeOptions.push('DOWN');
+                if ((onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolidForPlayer(px, py + 1)) escapeOptions.push('DOWN');
 
                 if (escapeOptions.length > 0) {
                     // 이전에 안 갔던 방향 우선
@@ -4741,7 +4803,7 @@
                 const escapeDir = closestEnemy.dx < 0 ? 1 : -1;
                 const canEscapeH = !this.isSolid(px + escapeDir, py) && (hasFloor || onBar);
                 const canEscapeUp = (onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1);
-                const canEscapeDown = (onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1);
+                const canEscapeDown = (onLadder || this.isLadder(px, py + 1) || onBar) && (!this.isSolidForPlayer(px, py + 1) || this.isDugHole(px, py + 1));
 
                 if (canEscapeH) {
                     this.keys[escapeDir < 0 ? 'LEFT' : 'RIGHT'] = true;
@@ -4789,36 +4851,36 @@
 
                     const moves = [];
 
-                    // 일반 이동
-                    if (x > 0 && !this.isSolid(x - 1, y) && canMove) {
+                    // 일반 이동 - enemies can walk ON brick but not THROUGH brick
+                    if (x > 0 && !this.isSolidOrBrick(x - 1, y) && canMove) {
                         moves.push({ x: x - 1, y, action: 'LEFT', dig: false });
                     }
-                    if (x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y) && canMove) {
+                    if (x < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(x + 1, y) && canMove) {
                         moves.push({ x: x + 1, y, action: 'RIGHT', dig: false });
                     }
-                    if (y > 0 && !this.isSolid(x, y - 1) && (currOnLadder || this.isLadder(x, y - 1))) {
+                    if (y > 0 && !this.isSolidOrBrick(x, y - 1) && (currOnLadder || this.isLadder(x, y - 1))) {
                         moves.push({ x, y: y - 1, action: 'UP', dig: false });
                     }
-                    if (y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
+                    if (y < LEVEL_HEIGHT - 1 && !this.isSolidOrBrick(x, y + 1)) {
                         if (currOnLadder || this.isLadder(x, y + 1) || currOnBar) {
                             moves.push({ x, y: y + 1, action: 'DOWN', dig: false });
                         }
                     }
                     // 낙하
-                    if (!currHasFloor && !currOnBar && y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
+                    if (!currHasFloor && !currOnBar && y < LEVEL_HEIGHT - 1 && !this.isSolidOrBrick(x, y + 1)) {
                         moves.push({ x, y: y + 1, action: 'FALL', dig: false });
                     }
 
                     // 파기를 통한 경로 (한 번만)
                     if (allowDig && !dug && canMove) {
-                        if (x > 0 && !this.isSolid(x - 1, y)) {
+                        if (x > 0 && !this.isSolidOrBrick(x - 1, y)) {
                             const digTile = this.getTile(x - 1, y + 1);
                             if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
                                 // 파기 후 그 방향으로 이동 + 낙하
                                 moves.push({ x: x - 1, y: y + 1, action: 'DIGL', dig: true });
                             }
                         }
-                        if (x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y)) {
+                        if (x < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(x + 1, y)) {
                             const digTile = this.getTile(x + 1, y + 1);
                             if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
                                 moves.push({ x: x + 1, y: y + 1, action: 'DIGR', dig: true });
@@ -4881,19 +4943,19 @@
                     const gex = Math.floor(goldEnemy.x + 0.5);
                     const gey = Math.floor(goldEnemy.y + 0.5);
                     // 적 방향으로 이동
-                    if (gex < px && !this.isSolid(px - 1, py) && (hasFloor || onBar)) {
+                    if (gex < px && !this.isSolidOrBrick(px - 1, py) && (hasFloor || onBar)) {
                         this.keys.LEFT = true;
                         this.updateDemoKeyDisplay();
                         return;
-                    } else if (gex > px && !this.isSolid(px + 1, py) && (hasFloor || onBar)) {
+                    } else if (gex > px && !this.isSolidOrBrick(px + 1, py) && (hasFloor || onBar)) {
                         this.keys.RIGHT = true;
                         this.updateDemoKeyDisplay();
                         return;
-                    } else if (gey < py && (onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1)) {
+                    } else if (gey < py && (onLadder || this.isLadder(px, py - 1)) && !this.isSolidOrBrick(px, py - 1)) {
                         this.keys.UP = true;
                         this.updateDemoKeyDisplay();
                         return;
-                    } else if (gey > py && (onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1)) {
+                    } else if (gey > py && (onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolidForPlayer(px, py + 1)) {
                         this.keys.DOWN = true;
                         this.updateDemoKeyDisplay();
                         return;
@@ -4903,18 +4965,18 @@
 
             // === Fallback: 탐험 모드 ===
             const possibleMoves = [];
-            if (!this.isSolid(px - 1, py) && (hasFloor || onBar)) possibleMoves.push('LEFT');
-            if (!this.isSolid(px + 1, py) && (hasFloor || onBar)) possibleMoves.push('RIGHT');
-            if ((onLadder || this.isLadder(px, py - 1)) && !this.isSolid(px, py - 1)) possibleMoves.push('UP');
-            if ((onLadder || this.isLadder(px, py + 1) || onBar) && !this.isSolid(px, py + 1)) possibleMoves.push('DOWN');
+            if (!this.isSolidOrBrick(px - 1, py) && (hasFloor || onBar)) possibleMoves.push('LEFT');
+            if (!this.isSolidOrBrick(px + 1, py) && (hasFloor || onBar)) possibleMoves.push('RIGHT');
+            if ((onLadder || this.isLadder(px, py - 1)) && !this.isSolidOrBrick(px, py - 1)) possibleMoves.push('UP');
+            if ((onLadder || this.isLadder(px, py + 1) || onBar) && (!this.isSolidForPlayer(px, py + 1) || this.isDugHole(px, py + 1))) possibleMoves.push('DOWN');
 
             // 파기 옵션 추가
             if (hasFloor) {
-                if (px > 0 && !this.isSolid(px - 1, py)) {
+                if (px > 0 && !this.isSolidOrBrick(px - 1, py)) {
                     const tile = this.getTile(px - 1, py + 1);
                     if (tile === TILE.BRICK || tile === TILE.TRAP) possibleMoves.push('DIGL');
                 }
-                if (px < LEVEL_WIDTH - 1 && !this.isSolid(px + 1, py)) {
+                if (px < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(px + 1, py)) {
                     const tile = this.getTile(px + 1, py + 1);
                     if (tile === TILE.BRICK || tile === TILE.TRAP) possibleMoves.push('DIGR');
                 }
@@ -4973,6 +5035,94 @@
             this.updateTitleMessage();
         }
 
+        toggleEditor() {
+            if (this.gameState === STATE.EDITOR) {
+                this.gameState = STATE.TITLE;
+                this.showMessage('');
+            } else {
+                this.gameState = STATE.EDITOR;
+                this.editorLevel = this.createEmptyLevel();
+                this.editorTile = TILE.BRICK;
+                this.showMessage('EDITOR - Click to place | 1-8: Select tile | S: Save | L: Load | ESC: Exit');
+            }
+            this.updateUI();
+        }
+
+        handleEditorInput(e, isDown) {
+            if (!isDown) return;
+
+            const keyMap = {
+                'Digit1': TILE.EMPTY,
+                'Digit2': TILE.BRICK,
+                'Digit3': TILE.SOLID,
+                'Digit4': TILE.LADDER,
+                'Digit5': TILE.BAR,
+                'Digit6': TILE.TRAP,
+                'Digit7': TILE.GOLD,
+                'Digit8': TILE.ESCAPE_LADDER
+            };
+
+            if (keyMap[e.code]) {
+                this.editorTile = keyMap[e.code];
+                return;
+            }
+
+            if (e.keyCode === 83) { // S - Save
+                this.saveEditorLevel();
+                this.showMessage('Level saved!');
+                return;
+            }
+
+            if (e.keyCode === 76) { // L - Load
+                this.loadEditorLevel();
+                this.showMessage('Level loaded!');
+                return;
+            }
+
+            if (e.keyCode === 80) { // P - Place player
+                this.placeEditorEntity('player');
+                return;
+            }
+
+            if (e.keyCode === 69) { // E - Place enemy
+                this.placeEditorEntity('enemy');
+                return;
+            }
+        }
+
+        placeEditorEntity(type) {
+            const px = Math.floor(this.player?.x || LEVEL_WIDTH / 2);
+            const py = Math.floor(this.player?.y || LEVEL_HEIGHT / 2);
+            
+            if (type === 'player') {
+                this.editorPlayer = { x: px, y: py };
+                this.showMessage('Player placed!');
+            } else if (type === 'enemy') {
+                if (!this.editorEnemies) this.editorEnemies = [];
+                this.editorEnemies.push({ x: px, y: py, startX: px, startY: py });
+                this.showMessage('Enemy placed!');
+            }
+        }
+
+        saveEditorLevel() {
+            const levelData = {
+                level: this.editorLevel,
+                player: this.editorPlayer,
+                enemies: this.editorEnemies || []
+            };
+            localStorage.setItem('loderunner_editor_level', JSON.stringify(levelData));
+        }
+
+        loadEditorLevel() {
+            const saved = localStorage.getItem('loderunner_editor_level');
+            if (saved) {
+                const data = JSON.parse(saved);
+                this.editorLevel = data.level;
+                this.editorPlayer = data.player;
+                this.editorEnemies = data.enemies;
+            }
+        }
+
         showMessage(msg) {
             this.messageEl.textContent = msg;
         }
@@ -4994,6 +5144,21 @@
             this.scoreEl.textContent = String(this.score).padStart(6, '0');
             this.levelEl.textContent = String(this.currentLevel).padStart(2, '0');
             this.livesEl.textContent = String(this.lives);
+        }
+
+        createEmptyLevel() {
+            const level = [];
+            for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                level[y] = [];
+                for (let x = 0; x < LEVEL_WIDTH; x++) {
+                    if (y === 0 || y === LEVEL_HEIGHT - 1 || x === 0 || x === LEVEL_WIDTH - 1) {
+                        level[y][x] = TILE.SOLID;
+                    } else {
+                        level[y][x] = TILE.EMPTY;
+                    }
+                }
+            }
+            return level;
         }
 
         loadLevel(levelNum) {
@@ -5037,7 +5202,7 @@
                             this.goldCount++;
                             break;
                         case 'P':
-                            this.player = { x: x, y: y, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0 };
+                            this.player = { x: x, y: y, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0, goldCount: 0, falseFloorTimer: 0 };
                             break;
                         case 'E':
                             this.enemies.push({
@@ -5055,7 +5220,7 @@
             }
 
             if (!this.player) {
-                this.player = { x: 1, y: LEVEL_HEIGHT - 2, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0 };
+                this.player = { x: 1, y: LEVEL_HEIGHT - 2, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0, goldCount: 0, falseFloorTimer: 0 };
             }
 
             this.updateUI();
@@ -5074,6 +5239,16 @@
 
         isSolid(x, y) {
             const t = this.getTile(x, y);
+            return t === TILE.SOLID;
+        }
+
+        isSolidForPlayer(x, y) {
+            const t = this.getTile(x, y);
+            return t === TILE.BRICK || t === TILE.SOLID;
+        }
+
+        isSolidOrBrick(x, y) {
+            const t = this.getTile(x, y);
             return t === TILE.BRICK || t === TILE.SOLID;
         }
 
@@ -5084,6 +5259,10 @@
 
         isBar(x, y) {
             return this.getTile(x, y) === TILE.BAR;
+        }
+
+        isFalseFloor(x, y) {
+            return this.getTile(x, y) === TILE.TRAP;
         }
 
         isInHole(x, y) {
@@ -5168,7 +5347,7 @@
             const tile = this.getTile(digX, digY);
             if (tile === TILE.BRICK || tile === TILE.TRAP) {
                 this.setTile(digX, digY, TILE.EMPTY);
-                this.dugHoles.push({ x: digX, y: digY, timer: 180 });
+                this.dugHoles.push({ x: digX, y: digY, timer: HOLE_FILL_TIME }); // 300 frames at 30fps (10 seconds - original Apple II)
                 this.sound.play('dig');
 
                 // Add digging animation effect (pickaxe swing)
@@ -5181,16 +5360,16 @@
                     maxFrames: 12
                 });
 
-                // Add debris particles
-                for (let i = 0; i < 8; i++) {
+                // Add debris particles (C64 style - red brick colors)
+                for (let i = 0; i < 6; i++) {
                     this.digParticles.push({
                         x: (digX + 0.5) * TILE_SIZE,
                         y: (digY + 0.3) * TILE_SIZE,
-                        vx: (Math.random() - 0.5) * 4 * SCALE + digDir * 2 * SCALE,
-                        vy: -Math.random() * 4 * SCALE - 2 * SCALE,
-                        size: (Math.random() * 3 + 2) * SCALE,
-                        life: 20 + Math.floor(Math.random() * 10),
-                        color: Math.random() > 0.5 ? '#B85C38' : '#8B4513'
+                        vx: (Math.random() - 0.5) * 3 * SCALE + digDir * 1.5 * SCALE,
+                        vy: -Math.random() * 3 * SCALE - 1 * SCALE,
+                        size: (Math.random() * 2 + 1.5) * SCALE,
+                        life: 15 + Math.floor(Math.random() * 8),
+                        color: Math.random() > 0.5 ? COLORS.RED : COLORS.BROWN
                     });
                 }
 
@@ -5226,8 +5405,12 @@
             const iy = Math.floor(y + 0.5);
             if (this.getTile(ix, iy) === TILE.GOLD) {
                 this.setTile(ix, iy, TILE.EMPTY);
-                this.score += 500;  // 원작: 금 수집 500점
+                this.score += 250;  // Apple II original: gold pickup 250 points
                 this.goldCollected++;
+                // Original Apple II rule: can only carry 1 gold at a time
+                if (this.player.goldCount === 0) {
+                    this.player.goldCount = 1;
+                }
                 this.sound.play('gold');
                 this.updateUI();
 
@@ -5240,27 +5423,60 @@
         activateEscape() {
             this.escapeLadderActive = true;
 
-            // Find all ladders in the top portion of the level (rows 0-4)
-            // and extend escape ladders from the top down to them
-            for (let x = 0; x < LEVEL_WIDTH; x++) {
-                // Find the highest ladder in this column (within top 5 rows)
-                let highestLadder = -1;
-                for (let y = 0; y <= 4; y++) {
+            // Find unique ladder columns and their highest positions
+            const ladderColumns = [];
+            for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                for (let y = 0; y < LEVEL_HEIGHT; y++) {
                     if (this.isLadder(x, y)) {
-                        highestLadder = y;
-                        break;
+                        ladderColumns.push({ x: x, y: y });
+                        break; // Only need highest ladder in each column
                     }
                 }
+            }
 
-                // If there's a ladder in the top area, extend escape ladder from y=0 down to it
-                if (highestLadder >= 0) {
-                    for (let y = 0; y < highestLadder; y++) {
-                        if (this.getTile(x, y) === TILE.EMPTY) {
-                            this.setTile(x, y, TILE.ESCAPE_LADDER);
+            // If there are ladders, sort by height (lowest y = highest on screen)
+            if (ladderColumns.length > 0) {
+                ladderColumns.sort((a, b) => a.y - b.y);
+
+                // Take only top 1-3 ladders (most accessible ones)
+                const numToTake = Math.min(3, ladderColumns.length);
+                for (let i = 0; i < numToTake; i++) {
+                    const col = ladderColumns[i];
+                    // Create escape ladder from top to this ladder
+                    for (let y = 0; y <= col.y; y++) {
+                        if (this.getTile(col.x, y) === TILE.EMPTY || this.getTile(col.x, y) === TILE.LADDER) {
+                            this.setTile(col.x, y, TILE.ESCAPE_LADDER);
                         }
                     }
                 }
             }
+
+            // If no ladders, try bars
+            if (ladderColumns.length === 0) {
+                const barColumns = [];
+                for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                    for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                        if (this.getTile(x, y) === TILE.BAR) {
+                            barColumns.push({ x: x, y: y });
+                            break;
+                        }
+                    }
+                }
+
+                if (barColumns.length > 0) {
+                    barColumns.sort((a, b) => a.y - b.y);
+                    const numToTake = Math.min(3, barColumns.length);
+                    for (let i = 0; i < numToTake; i++) {
+                        const col = barColumns[i];
+                        for (let y = 0; y <= col.y; y++) {
+                            if (this.getTile(col.x, y) === TILE.EMPTY) {
+                                this.setTile(col.x, y, TILE.ESCAPE_LADDER);
+                            }
+                        }
+                    }
+                }
+            }
+
             this.showMessage('ESCAPE TO TOP!');
             this.sound.play('escape');
         }
@@ -5272,13 +5488,29 @@
             const py = Math.floor(p.y + 0.5);
 
             const onLadder = this.isLadder(px, py);
-            const onBar = this.isBar(px, py);
-            const onGround = this.isSolid(px, py + 1) || this.isLadder(px, py) || this.isLadder(px, py + 1);
+            const onBar = this.isBar(px, py) || this.isBar(px, py - 1);
+            const belowIsBar = this.isBar(px, py + 1);
+            
+            // False Floor (TRAP) check - falls through after 1 frame delay
+            const onFalseFloor = this.isFalseFloor(px, py + 1);
+            if (onFalseFloor) {
+                p.falseFloorTimer++;
+                // Original rule: 1 frame delay before falling through
+                if (p.falseFloorTimer > 1) {
+                    // Allow falling through false floor
+                }
+            } else {
+                p.falseFloorTimer = 0;
+            }
+            
+            const onGround = (this.isSolidForPlayer(px, py + 1) || this.isLadder(px, py) || this.isLadder(px, py + 1)) 
+                && !(onFalseFloor && p.falseFloorTimer > 1)
+                && !this.isDugHole(px, py + 1);
             
             // Check for trapped entity (player or enemy) below player - can walk on their head
             const onTrappedEntity = this.getTrappedEntityAtTile(px, py + 1);
 
-            // Check if player is in a hole
+            // Check if player is in a hole - fall through if below is empty
             if (p.trapped > 0) {
                 p.trapped--;
                 const holeX = Math.floor(p.x);
@@ -5289,27 +5521,64 @@
                 p.vx = 0;
                 p.vy = 0;
 
-                // Try to escape after some time (unlike enemies, players can't climb out)
-                // They need to wait for hole to fill or be helped by enemy
-                // For now, player dies if trapped - this is original Lode Runner behavior
+                // If below is empty or hole, fall through instead of staying trapped
+                const belowTile = this.getTile(holeX, holeY + 1);
+                const belowIsHole = this.isDugHole(holeX, holeY + 1);
+                if (belowTile === TILE.EMPTY || belowIsHole) {
+                    p.trapped = 0;
+                } else if (trappedEnemy) {
+                    // Player can walk on trapped enemy to escape
+                    if (keys.LEFT && holeX > 0 && !this.isSolidForPlayer(holeX - 1, holeY)) {
+                        p.trapped = 0;
+                        p.x = holeX - 1;
+                        p.y = holeY - 1;
+                        p.dir = -1;
+                    } else if (keys.RIGHT && holeX < LEVEL_WIDTH - 1 && !this.isSolidForPlayer(holeX + 1, holeY)) {
+                        p.trapped = 0;
+                        p.x = holeX + 1;
+                        p.y = holeY - 1;
+                        p.dir = 1;
+                    }
+                }
+
+                // Try to escape after hole fills (original C64 behavior)
                 if (p.trapped <= 0) {
                     // Player escapes when hole fills - same as original
                     p.trapped = 0;
                 }
-                // Don't process normal movement when trapped
-                return;
+                
+                // Don't process normal movement when trapped (unless escaping via trapped enemy)
+                if (p.trapped > 0) {
+                    return;
+                }
             }
 
             // Check if player falls into a trap/hole
+            // Apple II original: player CANNOT climb out of holes (unlike enemies)
             if (!onGround && !onLadder && !onBar && p.vy > 0) {
-                const checkX = Math.floor(p.x + 0.5);
-                const checkY = Math.floor(p.y + 0.5);
-                
                 for (const hole of this.dugHoles) {
-                    if (hole.x === checkX && hole.y === checkY) {
+                    // Check if player is over this hole (including edge cases)
+                    // Allow for player being on the edge of the hole
+                    const playerLeft = p.x - 0.3;
+                    const playerRight = p.x + 0.3;
+                    const playerBottom = p.y;
+                    const playerTop = p.y + 1;
+                    
+                    const isOverHoleX = playerRight > hole.x && playerLeft < hole.x + 1;
+                    const isOverHoleY = playerBottom < hole.y + 1 && playerTop > hole.y;
+                    
+                    if (isOverHoleX && isOverHoleY) {
                         // Only trap if hole is not already occupied
                         if (!this.isHoleOccupied(hole.x, hole.y, null)) {
-                            p.trapped = 180; // 6 seconds at 30fps
+                            // If below is empty or is also a hole, keep falling through (don't trap)
+                            const belowTile = this.getTile(hole.x, hole.y + 1);
+                            const belowIsHole = this.isDugHole(hole.x, hole.y + 1);
+                            if (belowTile === TILE.EMPTY || belowIsHole) {
+                                // Keep falling - don't trap
+                                break;
+                            }
+                            // Trap player in hole
+                            p.trapped = HOLE_FILL_TIME;
                             p.x = hole.x + 0.5;
                             p.y = hole.y;
                             p.vx = 0;
@@ -5323,7 +5592,7 @@
 
             // Gravity
             if (!onGround && !onLadder && !onBar && !onTrappedEntity) {
-                p.vy = 0.25;
+                p.vy = 0.25 * this.speedMultiplier;
             } else {
                 p.vy = 0;
                 // Snap to trapped entity head when standing on them
@@ -5334,14 +5603,16 @@
 
             // Movement
             p.vx = 0;
-            const speed = 0.14;
+            const baseSpeed = PLAYER_SPEED * this.speedMultiplier;
+            // Rope movement is faster (original speedrun exploit)
+            const speed = onBar ? baseSpeed * ROPE_SPEED_MULTIPLIER : baseSpeed;
 
-            if (keys.LEFT && !this.isSolid(px - 1, py)) {
+            if (keys.LEFT && !this.isSolidForPlayer(px - 1, py)) {
                 if (onGround || onLadder || onBar || onTrappedEntity || p.vy > 0) {
                     p.vx = -speed;
                     p.dir = -1;
                 }
-            } else if (keys.RIGHT && !this.isSolid(px + 1, py)) {
+            } else if (keys.RIGHT && !this.isSolidForPlayer(px + 1, py)) {
                 if (onGround || onLadder || onBar || onTrappedEntity || p.vy > 0) {
                     p.vx = speed;
                     p.dir = 1;
@@ -5349,21 +5620,46 @@
             }
 
             if (keys.UP && (onLadder || this.isLadder(px, py - 1))) {
-                if (!this.isSolid(px, py - 1)) {
+                if (!this.isSolidForPlayer(px, py - 1)) {
                     p.vy = -speed;
                     p.vx = 0;
                 }
-            } else if (keys.DOWN) {
+            }
+            
+            if (keys.DOWN) {
                 if (onLadder || this.isLadder(px, py + 1)) {
-                    if (!this.isSolid(px, py + 1)) {
+                    if (!this.isSolidForPlayer(px, py + 1)) {
                         p.vy = speed;
                         p.vx = 0;
                     }
-                } else if (onBar && !this.isSolid(px, py + 1)) {
-                    // Drop from bar with DOWN key (원작 메카닉)
+                } else if (onBar) {
+                    // Drop from bar with DOWN key - always allow if on bar and below is not solid
                     p.vy = speed;
                     p.vx = 0;
                 }
+            }
+
+            // Auto-grab bar when running into it from below (Apple II original mechanic)
+            // Check if player is running and bar is at current position (slightly above)
+            if (!onLadder && !onBar && p.vx !== 0 && this.isBar(px, py - 1)) {
+                // Snap to bar above
+                p.y = py - 1;
+                p.vx = 0;
+                // Continue moving horizontally on bar
+                if (keys.LEFT && !this.isSolidForPlayer(px - 1, py - 1)) {
+                    p.vx = -speed;
+                    p.dir = -1;
+                } else if (keys.RIGHT && !this.isSolidForPlayer(px + 1, py - 1)) {
+                    p.vx = speed;
+                    p.dir = 1;
+                }
+            }
+
+            // Auto-grab bar when jumping/falling into it from below
+            if (!onLadder && !onBar && p.vy > 0 && this.isBar(px, py - 1)) {
+                // Grab the bar
+                p.y = py - 1;
+                p.vy = 0;
             }
 
             p.x += p.vx;
@@ -5377,7 +5673,7 @@
             if (!onLadder && !onBar && p.vy === 0) {
                 const newPx = Math.floor(p.x + 0.5);
                 const newPy = Math.floor(p.y + 0.5);
-                const newOnGround = this.isSolid(newPx, newPy + 1) || this.isLadder(newPx, newPy + 1);
+                const newOnGround = this.isSolidForPlayer(newPx, newPy + 1) || this.isLadder(newPx, newPy + 1);
                 if (newOnGround) {
                     p.y = Math.round(p.y);
                 }
@@ -5392,7 +5688,7 @@
                 // Validate dig position and conditions
                 if ((onGround || onLadder || onBar) &&
                     digX >= 0 && digX < LEVEL_WIDTH && digY >= 0 && digY < LEVEL_HEIGHT &&
-                    !this.isSolid(px + digDir, py)) {
+                    !this.isSolidForPlayer(px + digDir, py)) {
                     this.dig(digX, digY);
                 }
                 keys.DIGL = false;
@@ -5459,14 +5755,14 @@
                             if (enemyBottom > holeTop && enemyTop < holeBottom) {
                                 // Only trap if hole is not already occupied
                                 if (!this.isHoleOccupied(hole.x, hole.y, e)) {
-                                    e.trapped = 120;
+                                    e.trapped = ENEMY_TRAPPED_TIME;
                                     e.x = hole.x + 0.5;
                                     e.y = hole.y;
                                     e.vx = 0;
                                     e.vy = 0;
                                     this.sound.play('trap');
                                     caughtInHole = true;
-                                    this.score += 100;  // 원작: 적 함정에 빠뜨리기 100점
+                                    this.score += 75;  // C64 original: trapping enemy 75 points
                                     this.updateUI();
 
                                     if (e.hasGold) {
@@ -5495,7 +5791,7 @@
                     e.vx = 0;
                     e.vy = 0;
 
-                    if (e.trapped < 60 && !this.isSolid(holeX, holeY - 1)) {
+                    if (e.trapped < ENEMY_TRAPPED_ESCAPE && !this.isSolidOrBrick(holeX, holeY - 1)) {
                         e.y -= 0.025;
                         // Escape when climbing out of hole
                         if (e.y <= holeY - 1) {
@@ -5512,8 +5808,13 @@
                 const onLadder = this.isLadder(ex, ey);
                 const onBar = this.isBar(ex, ey);
                 const belowIsLadder = this.isLadder(ex, ey + 1);
-                const belowSolid = this.isSolid(ex, ey + 1);
-                const onGround = belowSolid || onLadder || belowIsLadder;
+                const belowSolid = this.isSolidOrBrick(ex, ey + 1);
+                
+                // False Floor (TRAP) - enemies fall through more easily (no delay)
+                const onFalseFloor = this.isFalseFloor(ex, ey + 1);
+                
+                // Original rule: enemies fall through false floor immediately (no 1-frame delay)
+                const onGround = (belowSolid || onLadder || belowIsLadder) && !onFalseFloor;
                 
                 // Check for trapped player or enemy below (can walk on their head)
                 const onTrappedEntity = this.getTrappedEntityAtTile(ex, ey + 1);
@@ -5524,18 +5825,18 @@
 
                 // Falling check - not on ground, ladder, bar, or trapped entity
                 if (!onGround && !onLadder && !onBar && !onTrappedBelow) {
-                    e.vy = 0.2;
+                    e.vy = 0.2 * this.speedMultiplier;
                 } else {
                     // Chase player
                     const dx = p.x - e.x;
                     const dy = p.y - e.y;
-                    const speed = 0.06;
+                    const speed = 0.06 * this.speedMultiplier;
 
-                    // Movement checks
-                    const canLeft = ex > 0 && !this.isSolid(ex - 1, ey);
-                    const canRight = ex < LEVEL_WIDTH - 1 && !this.isSolid(ex + 1, ey);
-                    const canUp = ey > 0 && !this.isSolid(ex, ey - 1) && (onLadder || this.isLadder(ex, ey - 1));
-                    const canDown = ey < LEVEL_HEIGHT - 1 && !this.isSolid(ex, ey + 1) && (onLadder || belowIsLadder);
+                    // Movement checks - enemies can walk ON BRICK but not THROUGH BRICK
+                    const canLeft = ex > 0 && !this.isSolidOrBrick(ex - 1, ey);
+                    const canRight = ex < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(ex + 1, ey);
+                    const canUp = ey > 0 && !this.isSolidOrBrick(ex, ey - 1) && (onLadder || this.isLadder(ex, ey - 1));
+                    const canDown = ey < LEVEL_HEIGHT - 1 && !this.isSolidOrBrick(ex, ey + 1) && (onLadder || belowIsLadder);
 
                     // Simple AI: prioritize direction toward player
                     if (onLadder || onTrappedBelow) {
@@ -5559,7 +5860,7 @@
                         // On bar - move horizontally or drop
                         if (dy > 1 && !belowSolid && Math.abs(dx) < 2) {
                             // Drop toward player below
-                            e.vy = 0.2;
+                            e.vy = 0.2 * this.speedMultiplier;
                         } else if (dx < -0.5 && canLeft) {
                             e.vx = -speed;
                             e.dir = -1;
@@ -5660,7 +5961,7 @@
                     e.y = Math.floor(onTrappedEntity.y) - 1;
                 }
 
-                // Gold pickup with cooldown (goldPickupCooldown initialized in loadLevel)
+                // Gold pickup with cooldown (Apple II original: 5% chance per frame when passing through)
                 if (!e.hasGold && this.getTile(ex, ey) === TILE.GOLD) {
                     if (e.goldPickupCooldown <= 0 && Math.random() < GOLD_PICKUP_CHANCE) {
                         e.hasGold = true;
@@ -5673,13 +5974,37 @@
                     e.goldPickupCooldown--;
                 }
 
-                // Random gold drop while carrying (original game mechanic)
+                // Random gold drop while carrying (Apple II original: 2% chance)
+                // Smart drop: enemy tries to drop gold in a safe place when being chased
                 if (e.hasGold && Math.random() < GOLD_DROP_CHANCE) {
-                    // Drop gold at current position if empty
-                    if (this.getTile(ex, ey) === TILE.EMPTY) {
-                        e.hasGold = false;
-                        this.setTile(ex, ey, TILE.GOLD);
-                        this.sound.play('drop');
+                    // Check if player is close and below - drop to create trap
+                    const distToPlayer = Math.sqrt(dx * dx + dy * dy);
+                    if (distToPlayer < 3 && dy > 0) {
+                        // Drop gold to potentially trap player
+                        if (this.getTile(ex, ey) === TILE.EMPTY) {
+                            e.hasGold = false;
+                            this.setTile(ex, ey, TILE.GOLD);
+                            this.sound.play('drop');
+                        }
+                    } else if (Math.random() < 0.3) {
+                        // Random drop
+                        if (this.getTile(ex, ey) === TILE.EMPTY) {
+                            e.hasGold = false;
+                            this.setTile(ex, ey, TILE.GOLD);
+                            this.sound.play('drop');
+                        }
+                    }
+                }
+
+                // Enemy with gold prioritizes escaping to the top (Apple II behavior)
+                if (e.hasGold && (onGround || onTrappedBelow) && ey < 5) {
+                    // Move toward left side of the map to escape (common pattern)
+                    if (canLeft && ex > 3) {
+                        e.vx = -speed;
+                        e.dir = -1;
+                    } else if (canRight && ex < LEVEL_WIDTH - 4) {
+                        e.vx = speed;
+                        e.dir = 1;
                     }
                 }
 
@@ -5697,7 +6022,7 @@
                 if (hole.timer <= 0) {
                     for (const e of this.enemies) {
                         if (Math.floor(e.x + 0.5) === hole.x && Math.floor(e.y + 0.5) === hole.y) {
-                            this.score += 100;  // 원작: 적 함정에서 죽음 100점
+                            this.score += 75;  // C64 original: enemy dies in hole 75 points
                             this.updateUI();
                             this.sound.play('kill');
                             this.respawnEnemy(e);
@@ -5778,10 +6103,27 @@
                 const dx = Math.abs(p.x - e.x);
                 const dy = p.y - e.y;
 
-                // Player dies if horizontally close and vertically overlapping
-                // dy > -0.7: enemy is not too far above
-                // dy < 0.5: enemy is not too far below (player can stand on enemy head)
-                if (dx < 0.5 && dy > -0.5 && dy < 0.5) {
+                // Player standing on enemy head - can walk on them
+                if (dx < 0.7 && dy < -0.3 && dy > -0.8) {
+                    // Player is on top of enemy - safe to walk
+                    continue;
+                }
+
+                // Player dies if horizontally close and vertically overlapping (at same level)
+                if (dx < 0.5 && dy > -0.3 && dy < 0.5) {
+                    // Check if enemy has gold - player can steal it!
+                    if (e.hasGold) {
+                        e.hasGold = false;
+                        // Original Apple II rule: can only carry 1 gold at a time
+                        if (this.player.goldCount === 0) {
+                            this.player.goldCount = 1;
+                        }
+                        this.goldCollected++;
+                        this.score += 250;
+                        this.sound.play('gold');
+                        this.updateUI();
+                        continue; // Don't die if stole gold
+                    }
                     this.playerDie();
                     return;
                 }
@@ -5790,6 +6132,22 @@
 
         playerDie() {
             if (this.gameState !== STATE.PLAYING) return;
+
+            // Original Apple II: Drop gold when player dies (can only carry 1 gold)
+            if (this.player && this.player.goldCount > 0) {
+                const dropX = Math.floor(this.player.x + 0.5);
+                const dropY = Math.floor(this.player.y + 0.5);
+                
+                // Can only carry 1 gold, so just drop one
+                if (this.getTile(dropX, dropY) === TILE.EMPTY) {
+                    this.setTile(dropX, dropY, TILE.GOLD);
+                    this.player.goldCount = 0;
+                } else if (dropY > 0 && this.getTile(dropX, dropY - 1) === TILE.EMPTY) {
+                    this.setTile(dropX, dropY - 1, TILE.GOLD);
+                    this.player.goldCount = 0;
+                }
+                this.escapeLadderActive = false;
+            }
 
             this.gameState = STATE.DYING;
             this.lives--;
@@ -5800,9 +6158,19 @@
 
         levelComplete() {
             this.gameState = STATE.LEVEL_COMPLETE;
-            this.currentLevel++;
-            this.score += 2000;  // 원작: 레벨 클리어 2000점
-            this.lives++;
+            
+            // C64: After completing all 150 levels, speed increases and game restarts
+            if (this.currentLevel >= 150 && this.gameMode === 'classic') {
+                this.speedMultiplier = Math.min(this.speedMultiplier + 0.15, 2.0); // Max 2x speed
+                this.currentLevel = 1;
+                this.score = 0;
+                this.lives = 5;
+                this.showMessage('SPEED UP! ' + Math.round(this.speedMultiplier * 100) + '%');
+            } else {
+                this.currentLevel++;
+                this.score += 1500;  // C64 original: level complete 1500 points
+                this.lives++;
+            }
             this.goldCollected = 0;  // 다음 레벨을 위해 초기화
             this.escapeLadderActive = false;
             this.updateUI();
@@ -5815,163 +6183,22 @@
             if (this.gameState !== STATE.PLAYING) return;
 
             this.frameCount++;
-            this.updatePlayer();
-            this.updateEnemies();
-            this.updateHoles();
-            this.updateDigEffects();
-            this.checkCollisions();
-
-            // Check for stuck state periodically
-            this.stuckCheckTimer++;
-            if (this.stuckCheckTimer >= 30) { // Check every 1 second
-                this.stuckCheckTimer = 0;
-                this.checkStuck();
+            
+            try {
+                this.updatePlayer();
+                this.updateEnemies();
+                this.updateHoles();
+                this.updateDigEffects();
+                this.checkCollisions();
+            } catch (e) {
+                console.error('Update error:', e);
             }
         }
 
+        // checkStuck disabled - was causing game freeze
+        // Original Lode Runner doesn't have stuck detection
         checkStuck() {
-            if (this.gameState !== STATE.PLAYING) return;
-
-            // DEMO 모드에서는 스턱 체크 비활성화 (AI가 최적 플레이를 하지 않을 수 있음)
-            if (this.demoMode) return;
-
-            // Grace period after level start
-            if (this.levelStartGrace > 0) {
-                this.levelStartGrace--;
-                return;
-            }
-
-            const p = this.player;
-            if (!p) return;
-
-            const px = Math.floor(p.x + 0.5);
-            const py = Math.floor(p.y + 0.5);
-
-            // Don't check stuck if player is falling or moving
-            if (p.vy > 0.1 || Math.abs(p.vx) > 0.1) return;
-
-            // Don't check stuck if player is trapped in a hole (they'll die or escape)
-            if (p.trapped > 0) return;
-
-            // Don't check stuck if there are active digging effects (situation is changing)
-            if (this.diggingEffects.length > 0) return;
-
-            // Don't check stuck if there are active holes (situation may change)
-            if (this.dugHoles.length > 0) return;
-
-            // Check if player is trapped in a hole (legacy check, kept for compatibility)
-            if (this.isInHole(p.x, p.y)) {
-                const holeX = Math.floor(p.x);
-                const holeY = Math.floor(p.y);
-
-                for (const hole of this.dugHoles) {
-                    if (hole.x === holeX && hole.y === holeY) {
-                        // Player can't climb up (unlike enemies), only sideways
-                        const canMoveLeft = !this.isSolid(holeX - 1, holeY);
-                        const canMoveRight = !this.isSolid(holeX + 1, holeY);
-
-                        // If can't move sideways and hole will fill soon, player is stuck
-                        if (!canMoveLeft && !canMoveRight && hole.timer < 120) {
-                            this.triggerStuck('You are trapped in a hole!<br>Unlike enemies, players cannot climb out of holes.');
-                            return;
-                        }
-                    }
-                }
-                // If in hole but can move sideways, don't check further (player can escape)
-                return;
-            }
-
-            // Use BFS to find all reachable positions from player
-            const reachable = this.findReachablePositions(px, py);
-
-            // If escape ladder is active, check if player can reach the top
-            if (this.escapeLadderActive) {
-                let canEscape = false;
-                for (let x = 0; x < LEVEL_WIDTH; x++) {
-                    if (reachable.has(`${x},0`) || reachable.has(`${x},1`)) {
-                        canEscape = true;
-                        break;
-                    }
-                }
-                if (!canEscape) {
-                    this.triggerStuck('You cannot reach the escape ladder!<br>There is no path to the top of the level.');
-                    return;
-                }
-                return; // Don't check gold if escape is active
-            }
-
-            // Find all remaining gold positions (including gold held by enemies)
-            const goldPositions = [];
-            for (let y = 0; y < LEVEL_HEIGHT; y++) {
-                for (let x = 0; x < LEVEL_WIDTH; x++) {
-                    if (this.level[y][x] === TILE.GOLD) {
-                        goldPositions.push({ x, y });
-                    }
-                }
-            }
-
-            // Count gold held by enemies (they can drop it, so level might still be completable)
-            let enemyHeldGold = 0;
-            for (const e of this.enemies) {
-                if (e.hasGold) enemyHeldGold++;
-            }
-
-            // If no visible gold and enemies have gold, wait for them to drop it
-            if (goldPositions.length === 0 && enemyHeldGold > 0) {
-                return; // Not stuck, just waiting for enemy to drop gold
-            }
-
-            if (goldPositions.length === 0) return;
-
-            // Check each gold position
-            const unreachableGold = [];
-            for (const gold of goldPositions) {
-                const key = `${gold.x},${gold.y}`;
-                if (!reachable.has(key)) {
-                    // Check if we can dig to reach it
-                    let canDigToReach = false;
-
-                    // Check positions above the gold - can we dig down to it?
-                    for (let checkY = gold.y - 1; checkY >= 0; checkY--) {
-                        const aboveKey = `${gold.x},${checkY}`;
-                        if (reachable.has(aboveKey)) {
-                            // Check if there's a diggable path from above to gold
-                            let canDigPath = true;
-                            for (let digY = checkY + 1; digY <= gold.y; digY++) {
-                                const tile = this.getTile(gold.x, digY);
-                                if (tile !== TILE.BRICK && tile !== TILE.TRAP && tile !== TILE.EMPTY && tile !== TILE.GOLD) {
-                                    canDigPath = false;
-                                    break;
-                                }
-                            }
-                            if (canDigPath) {
-                                canDigToReach = true;
-                                break;
-                            }
-                        }
-                        // Stop if we hit a solid tile
-                        if (this.isSolid(gold.x, checkY)) break;
-                    }
-
-                    if (!canDigToReach) {
-                        unreachableGold.push(gold);
-                    }
-                }
-            }
-
-            if (unreachableGold.length > 0) {
-                // Before declaring stuck, verify it's truly unreachable
-                // (not just temporarily blocked by dug holes that will fill)
-                const gold = unreachableGold[0];
-
-                // If there are active holes, wait for them to fill
-                if (this.dugHoles.length > 0) {
-                    return; // Wait for holes to fill before declaring stuck
-                }
-
-                this.triggerStuck(`A treasure at position (${gold.x + 1}, ${gold.y + 1}) is unreachable!<br>There is no path to collect it.`);
-                return;
-            }
+            return;
         }
 
         findReachablePositions(startX, startY) {
@@ -6154,9 +6381,20 @@
             const ctx = this.ctx;
             const T = TILE_SIZE;
 
-            // Background gradient
-            const bgGrad = this.createGradient(0, 0, 0, CANVAS_HEIGHT, '#000033', '#000066');
-            ctx.fillStyle = bgGrad;
+            // Render editor mode
+            if (this.gameState === STATE.EDITOR) {
+                this.renderEditor();
+                return;
+            }
+
+            // Render title screen with C64 style
+            if (this.gameState === STATE.TITLE) {
+                this.renderTitleScreen(ctx);
+                return;
+            }
+
+            // C64 style: pure black background
+            ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
             // Draw tiles
@@ -6168,7 +6406,11 @@
 
             // Draw filling holes
             for (const hole of this.dugHoles) {
-                if (hole.timer < 50) {
+                // Original Apple II: last 1 second (~30 frames) has blinking effect
+                if (hole.timer < 30 && Math.floor(this.frameCount / 8) % 2 === 0) {
+                    // Blinking effect when hole is about to fill
+                    this.drawBrick(hole.x, hole.y);
+                } else if (hole.timer < 50) {
                     const fillAmt = 1 - (hole.timer / 50);
                     this.drawBrickPartial(hole.x, hole.y, fillAmt);
                 }
@@ -6186,22 +6428,100 @@
                 this.drawPlayer(this.player);
             }
 
+            // C64 style: Screen flash on death
+            if (this.gameState === STATE.DYING) {
+                const flashAlpha = 0.3 + Math.sin(this.frameCount * 0.5) * 0.2;
+                ctx.fillStyle = COLORS.RED;
+                ctx.globalAlpha = flashAlpha;
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                ctx.globalAlpha = 1;
+            }
+
+            // C64 style: Level complete flash
+            if (this.gameState === STATE.LEVEL_COMPLETE) {
+                const flashAlpha = 0.15 + Math.sin(this.frameCount * 0.3) * 0.1;
+                ctx.fillStyle = COLORS.GREEN;
+                ctx.globalAlpha = flashAlpha;
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                ctx.globalAlpha = 1;
+            }
+
+            // C64 style: Pause overlay
+            if (this.gameState === STATE.PAUSED) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                
+                ctx.textAlign = 'center';
+                ctx.font = `bold ${s(32)}px monospace`;
+                ctx.fillStyle = COLORS.YELLOW;
+                ctx.fillText('PAUSED', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+                
+                ctx.font = `${s(14)}px monospace`;
+                ctx.fillStyle = COLORS.CYAN;
+                const blink = Math.floor(this.frameCount / 30) % 2;
+                if (blink) {
+                    ctx.fillText('PRESS ENTER TO RESUME', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + s(40));
+                }
+                ctx.textAlign = 'left';
+            }
+
+            // C64 style: Game Over overlay
+            if (this.gameState === STATE.GAME_OVER) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                
+                ctx.textAlign = 'center';
+                ctx.font = `bold ${s(36)}px monospace`;
+                ctx.fillStyle = COLORS.RED;
+                ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - s(20));
+                
+                ctx.font = `${s(14)}px monospace`;
+                ctx.fillStyle = COLORS.YELLOW;
+                ctx.fillText('FINAL SCORE: ' + this.score, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + s(20));
+                
+                ctx.fillStyle = COLORS.CYAN;
+                const blink = Math.floor(this.frameCount / 30) % 2;
+                if (blink) {
+                    ctx.fillText('PRESS ENTER TO CONTINUE', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + s(60));
+                }
+                ctx.textAlign = 'left';
+            }
+
+            // C64 style: Stuck overlay
+            if (this.gameState === STATE.STUCK) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                
+                ctx.textAlign = 'center';
+                ctx.font = `bold ${s(32)}px monospace`;
+                ctx.fillStyle = COLORS.YELLOW;
+                ctx.fillText('STUCK!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - s(20));
+                
+                ctx.font = `${s(12)}px monospace`;
+                ctx.fillStyle = COLORS.RED;
+                ctx.fillText(this.stuckReason || 'NO WAY OUT', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + s(20));
+                
+                ctx.fillStyle = COLORS.CYAN;
+                const blink = Math.floor(this.frameCount / 30) % 2;
+                if (blink) {
+                    ctx.fillText('PRESS R TO RESTART', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + s(50));
+                }
+                ctx.textAlign = 'left';
+            }
+
             // Draw digging effects (pickaxe swing)
             for (const eff of this.diggingEffects) {
                 this.drawDiggingEffect(eff);
             }
 
-            // Draw debris particles
+            // Draw debris particles (C64 style - simple squares)
             for (const p of this.digParticles) {
                 const alpha = p.life / 30;
                 ctx.fillStyle = p.color;
                 ctx.globalAlpha = alpha;
-                ctx.beginPath();
-                ctx.moveTo(p.x, p.y - p.size);
-                ctx.lineTo(p.x + p.size * 0.7, p.y + p.size * 0.5);
-                ctx.lineTo(p.x - p.size * 0.7, p.y + p.size * 0.5);
-                ctx.closePath();
-                ctx.fill();
+                // Simple square particles (C64 style)
+                const size = p.size * 0.5;
+                ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
                 ctx.globalAlpha = 1;
             }
         }
@@ -6215,86 +6535,210 @@
             const py = eff.y * T;
             const progress = eff.frame / eff.maxFrames;
 
-            // Pickaxe swing animation
-            const swingAngle = Math.sin(progress * Math.PI) * 1.2;
-            const pickX = px + T * 0.5 + eff.dir * T * 0.3;
-            const pickY = py - T * 0.2;
+            // C64 style: Simple pickaxe (white line drawing)
+            const swingAngle = Math.sin(progress * Math.PI) * 0.8;
+            const pickX = px + T * 0.5 + eff.dir * T * 0.25;
+            const pickY = py - T * 0.1;
 
             ctx.save();
             ctx.translate(pickX, pickY);
-            ctx.rotate(eff.dir * swingAngle - eff.dir * 0.5);
+            ctx.rotate(eff.dir * swingAngle - eff.dir * 0.3);
 
-            // Pickaxe handle
-            ctx.strokeStyle = '#8B4513';
-            ctx.lineWidth = s(4);
+            // Simple white pickaxe (C64 style)
+            ctx.strokeStyle = COLORS.WHITE;
+            ctx.lineWidth = s(2);
             ctx.lineCap = 'round';
+
+            // Handle (line)
             ctx.beginPath();
             ctx.moveTo(0, 0);
-            ctx.lineTo(eff.dir * T * 0.4, -T * 0.3);
+            ctx.lineTo(eff.dir * T * 0.25, -T * 0.2);
             ctx.stroke();
 
-            // Pickaxe head
-            const headX = eff.dir * T * 0.4;
-            const headY = -T * 0.3;
-            ctx.fillStyle = '#707070';
+            // Pickaxe head (simple arc)
+            const headX = eff.dir * T * 0.25;
+            const headY = -T * 0.2;
             ctx.beginPath();
-            ctx.moveTo(headX, headY);
-            ctx.lineTo(headX + eff.dir * T * 0.25, headY - T * 0.08);
-            ctx.lineTo(headX + eff.dir * T * 0.28, headY + T * 0.05);
-            ctx.lineTo(headX, headY + T * 0.08);
-            ctx.lineTo(headX - eff.dir * T * 0.15, headY + T * 0.12);
-            ctx.lineTo(headX - eff.dir * T * 0.12, headY);
-            ctx.closePath();
-            ctx.fill();
-
-            // Metallic shine
-            ctx.strokeStyle = '#A0A0A0';
-            ctx.lineWidth = s(1);
-            ctx.beginPath();
-            ctx.moveTo(headX + eff.dir * T * 0.05, headY - T * 0.02);
-            ctx.lineTo(headX + eff.dir * T * 0.2, headY - T * 0.05);
+            ctx.arc(headX, headY, T * 0.12, -Math.PI * 0.7, Math.PI * 0.2);
             ctx.stroke();
 
             ctx.restore();
 
-            // Impact sparks at the dig point
-            if (progress > 0.4 && progress < 0.7) {
-                const sparkCount = 5;
-                for (let i = 0; i < sparkCount; i++) {
-                    const angle = (i / sparkCount) * Math.PI - Math.PI / 2 + eff.dir * 0.3;
-                    const dist = T * 0.2 * (1 + Math.random() * 0.5);
-                    const sparkX = px + T * 0.5 + Math.cos(angle) * dist;
-                    const sparkY = py + T * 0.3 + Math.sin(angle) * dist * 0.5;
+            // C64 style: Simple dust particles (white squares)
+            if (progress > 0.3 && progress < 0.8) {
+                const dustCount = 3;
+                for (let i = 0; i < dustCount; i++) {
+                    const dustX = px + T * 0.3 + (i * T * 0.2) + eff.dir * T * 0.1;
+                    const dustY = py + T * 0.4 + Math.random() * T * 0.3;
+                    const dustSize = s(2 + Math.random() * 2);
+                    
+                    ctx.fillStyle = COLORS.LIGHT_GRAY;
+                    ctx.fillRect(dustX, dustY, dustSize, dustSize);
+                }
+            }
 
-                    ctx.fillStyle = Math.random() > 0.5 ? '#FFFF00' : '#FFA500';
+            // Simple crack effect on brick (C64 style lines)
+            if (progress < 0.6) {
+                const crackAlpha = progress * 2;
+                ctx.strokeStyle = `rgba(0, 0, 0, ${crackAlpha})`;
+                ctx.lineWidth = s(1);
+
+                ctx.beginPath();
+                ctx.moveTo(px + T * 0.4, py + T * 0.3);
+                ctx.lineTo(px + T * 0.5, py + T * 0.6);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(px + T * 0.5, py + T * 0.6);
+                ctx.lineTo(px + T * 0.6, py + T * 0.4);
+                ctx.stroke();
+            }
+        }
+
+        renderEditor() {
+            const ctx = this.ctx;
+            const T = TILE_SIZE;
+
+            // C64 style: pure black background
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Draw editor level
+            for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                for (let x = 0; x < LEVEL_WIDTH; x++) {
+                    this.drawTile(x, y, this.editorLevel[y][x]);
+                }
+            }
+
+            // Draw player
+            if (this.editorPlayer) {
+                ctx.fillStyle = COLORS.CYAN;
+                ctx.beginPath();
+                ctx.arc(
+                    (this.editorPlayer.x + 0.5) * T,
+                    (this.editorPlayer.y + 0.5) * T,
+                    T * 0.3, 0, Math.PI * 2
+                );
+                ctx.fill();
+            }
+
+            // Draw enemies
+            if (this.editorEnemies) {
+                for (const e of this.editorEnemies) {
+                    ctx.fillStyle = COLORS.RED;
                     ctx.beginPath();
-                    ctx.arc(sparkX, sparkY, s(2 + Math.random() * 2), 0, Math.PI * 2);
+                    ctx.arc(
+                        (e.x + 0.5) * T,
+                        (e.y + 0.5) * T,
+                        T * 0.3, 0, Math.PI * 2
+                    );
                     ctx.fill();
                 }
             }
 
-            // Crack effect on the brick area
-            if (progress < 0.5) {
-                const crackAlpha = progress * 2;
-                ctx.strokeStyle = `rgba(0, 0, 0, ${crackAlpha * 0.8})`;
-                ctx.lineWidth = s(2);
+            // Draw selected tile indicator
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `${Math.round(16 * SCALE)}px monospace`;
+            ctx.fillText('Selected: ' + this.getTileName(this.editorTile), 10, CANVAS_HEIGHT - 10);
 
-                // Draw cracks
-                ctx.beginPath();
-                ctx.moveTo(px + T * 0.3, py + T * 0.2);
-                ctx.lineTo(px + T * 0.5, py + T * 0.5);
-                ctx.lineTo(px + T * 0.4, py + T * 0.8);
-                ctx.stroke();
+            // Draw tile palette
+            const paletteY = CANVAS_HEIGHT - 40 * SCALE;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, paletteY, CANVAS_WIDTH, 40 * SCALE);
+            
+            const tiles = [
+                { tile: TILE.EMPTY, label: '1:Empty' },
+                { tile: TILE.BRICK, label: '2:Brick' },
+                { tile: TILE.SOLID, label: '3:Solid' },
+                { tile: TILE.LADDER, label: '4:Ladder' },
+                { tile: TILE.BAR, label: '5:Bar' },
+                { tile: TILE.TRAP, label: '6:Trap' },
+                { tile: TILE.GOLD, label: '7:Gold' },
+                { tile: TILE.ESCAPE_LADDER, label: '8:EscLdr' }
+            ];
+            
+            let x = 10;
+            for (const t of tiles) {
+                ctx.fillStyle = t.tile === this.editorTile ? '#FFFF00' : '#FFFFFF';
+                ctx.font = `${Math.round(12 * SCALE)}px monospace`;
+                ctx.fillText(t.label, x, paletteY + 20 * SCALE);
+                x += 80 * SCALE;
+            }
+        }
 
-                ctx.beginPath();
-                ctx.moveTo(px + T * 0.5, py + T * 0.5);
-                ctx.lineTo(px + T * 0.7, py + T * 0.3);
-                ctx.stroke();
+        renderTitleScreen(ctx) {
+            const s = (v) => v * SCALE;
+            
+            // Pure black background
+            ctx.fillStyle = COLORS.BLACK;
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-                ctx.beginPath();
-                ctx.moveTo(px + T * 0.5, py + T * 0.5);
-                ctx.lineTo(px + T * 0.8, py + T * 0.7);
-                ctx.stroke();
+            // C64 style title text
+            ctx.textAlign = 'center';
+            
+            // Main title - C64 style
+            const titleY = CANVAS_HEIGHT * 0.25;
+            ctx.font = `bold ${s(36)}px monospace`;
+            
+            // LODE RUNNER title with animation
+            const pulse = Math.sin(this.frameCount * 0.1) * 0.15 + 0.85;
+            ctx.globalAlpha = pulse;
+            
+            // Red title
+            ctx.fillStyle = COLORS.RED;
+            ctx.fillText('LODE RUNNER', CANVAS_WIDTH / 2, titleY);
+            
+            // White border effect
+            ctx.strokeStyle = COLORS.WHITE;
+            ctx.lineWidth = s(2);
+            ctx.strokeText('LODE RUNNER', CANVAS_WIDTH / 2, titleY);
+            ctx.globalAlpha = 1;
+
+            // Subtitle
+            ctx.font = `bold ${s(16)}px monospace`;
+            ctx.fillStyle = COLORS.CYAN;
+            const modeText = this.gameMode === 'championship' ? 'CHAMPIONSHIP' : 'CLASSIC';
+            ctx.fillText(`${modeText} EDITION`, CANVAS_WIDTH / 2, titleY + s(35));
+
+            // Level count
+            ctx.font = `${s(12)}px monospace`;
+            ctx.fillStyle = COLORS.LIGHT_GRAY;
+            const levelCount = this.gameMode === 'championship' ? '50 LEVELS' : '150 LEVELS';
+            ctx.fillText(`${levelCount}`, CANVAS_WIDTH / 2, titleY + s(60));
+
+            // Instructions
+            ctx.font = `${s(14)}px monospace`;
+            ctx.fillStyle = COLORS.YELLOW;
+            const blink = Math.floor(this.frameCount / 30) % 2;
+            if (blink) {
+                ctx.fillText('PRESS ENTER TO START', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.55);
+            }
+
+            // Credits
+            ctx.font = `${s(10)}px monospace`;
+            ctx.fillStyle = COLORS.GRAY;
+            ctx.fillText('(C) 1983 BRODERBUND SOFTWARE', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.75);
+            ctx.fillText('A DOUG SMITH PRODUCTION', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.78);
+
+            // Controls info
+            ctx.fillStyle = COLORS.CYAN;
+            ctx.fillText('CONTROLS: ARROWS/WASD - MOVE | Z/X - DIG', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
+            ctx.fillText('ENTER - START/PAUSE | ESC - PAUSE | R - RESTART', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.93);
+
+            ctx.textAlign = 'left';
+        }
+
+        getTileName(tile) {
+            switch (tile) {
+                case TILE.EMPTY: return 'Empty';
+                case TILE.BRICK: return 'Brick';
+                case TILE.SOLID: return 'Solid';
+                case TILE.LADDER: return 'Ladder';
+                case TILE.BAR: return 'Bar';
+                case TILE.TRAP: return 'Trap';
+                case TILE.GOLD: return 'Gold';
+                case TILE.ESCAPE_LADDER: return 'EscapeLadder';
+                default: return 'Unknown';
             }
         }
 
@@ -6311,29 +6755,20 @@
                     break;
 
                 case TILE.SOLID:
-                    // Vector stone block with gradient
-                    const stoneGrad = this.createGradient(px, py, px, py + T, '#707070', '#505050');
-                    this.drawRoundRect(px, py, T, T, s(2));
-                    ctx.fillStyle = stoneGrad;
-                    ctx.fill();
-
-                    // Stone texture blocks
-                    const blockSize = T * 0.42;
-                    const gap = T * 0.08;
-                    for (let row = 0; row < 2; row++) {
-                        for (let col = 0; col < 2; col++) {
-                            const bx = px + gap + col * (blockSize + gap);
-                            const by = py + gap + row * (blockSize + gap);
-                            const blockGrad = this.createGradient(bx, by, bx + blockSize, by + blockSize, '#808080', '#585858');
-                            this.drawRoundRect(bx, by, blockSize, blockSize, s(2));
-                            ctx.fillStyle = blockGrad;
-                            ctx.fill();
-                            // Highlight
-                            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-                            ctx.lineWidth = s(1);
-                            ctx.stroke();
-                        }
-                    }
+                    // C64 style: blue/gray solid block
+                    ctx.fillStyle = COLORS.BLUE;
+                    ctx.fillRect(px, py, T, T);
+                    
+                    // Simple texture pattern
+                    ctx.fillStyle = '#1A1449'; // darker blue
+                    ctx.fillRect(px + T * 0.1, py + T * 0.1, T * 0.35, T * 0.35);
+                    ctx.fillRect(px + T * 0.55, py + T * 0.55, T * 0.35, T * 0.35);
+                    
+                    // Border
+                    ctx.strokeStyle = COLORS.LIGHT_BLUE;
+                    ctx.lineWidth = s(1);
+                    ctx.strokeRect(px + s(1), py + s(1), T - s(2), T - s(2));
+                    break;
                     // Border
                     this.drawRoundRect(px, py, T, T, s(2));
                     ctx.strokeStyle = '#303030';
@@ -6342,74 +6777,50 @@
                     break;
 
                 case TILE.LADDER:
-                    // Vector wooden ladder
-                    const railW = T * 0.15;
-                    const rungH = T * 0.12;
-
-                    // Left rail with gradient
-                    const railGrad = this.createGradient(px + T * 0.12, py, px + T * 0.27, py, '#A0522D', '#6B3A1A');
-                    this.drawRoundRect(px + T * 0.12, py, railW, T, s(2));
-                    ctx.fillStyle = railGrad;
-                    ctx.fill();
-
+                    // C64 style: simple wooden ladder
+                    ctx.fillStyle = COLORS.YELLOW;
+                    // Left rail
+                    ctx.fillRect(px + T * 0.15, py, T * 0.1, T);
                     // Right rail
-                    this.drawRoundRect(px + T * 0.73, py, railW, T, s(2));
-                    ctx.fillStyle = railGrad;
-                    ctx.fill();
-
-                    // Rungs with 3D effect
-                    const rungGrad = this.createGradient(px, py, px, py + rungH, '#DEB887', '#8B7355');
+                    ctx.fillRect(px + T * 0.75, py, T * 0.1, T);
+                    // Rungs
+                    ctx.fillStyle = COLORS.ORANGE;
                     for (let i = 0; i < 3; i++) {
-                        const ry = py + T * 0.18 + i * T * 0.33;
-                        this.drawRoundRect(px + T * 0.25, ry, T * 0.5, rungH, s(2));
-                        ctx.fillStyle = rungGrad;
-                        ctx.fill();
-                        ctx.strokeStyle = '#5D3A1A';
-                        ctx.lineWidth = s(1);
-                        ctx.stroke();
+                        ctx.fillRect(px + T * 0.25, py + T * 0.15 + i * T * 0.35, T * 0.5, T * 0.08);
                     }
                     break;
 
                 case TILE.ESCAPE_LADDER:
+                    // C64 style: flashing escape ladder
                     const flash = Math.floor(this.frameCount / 4) % 2;
-                    const glowIntensity = 0.3 + Math.sin(this.frameCount * 0.2) * 0.2;
-
-                    // Glow effect
-                    const glowGrad = this.createRadialGradient(px + T/2, py + T/2, 0, T * 0.8,
-                        `rgba(0, 255, 0, ${glowIntensity})`, 'rgba(0, 255, 0, 0)');
-                    ctx.fillStyle = glowGrad;
-                    ctx.fillRect(px - T*0.2, py - T*0.2, T * 1.4, T * 1.4);
-
-                    // Rails
-                    ctx.fillStyle = flash ? '#00FF00' : '#88FF00';
-                    this.drawRoundRect(px + T * 0.12, py, T * 0.15, T, s(2));
-                    ctx.fill();
-                    this.drawRoundRect(px + T * 0.73, py, T * 0.15, T, s(2));
-                    ctx.fill();
-
+                    ctx.fillStyle = flash ? COLORS.YELLOW : COLORS.LIGHT_GREEN;
+                    // Left rail
+                    ctx.fillRect(px + T * 0.15, py, T * 0.1, T);
+                    // Right rail
+                    ctx.fillRect(px + T * 0.75, py, T * 0.1, T);
                     // Rungs
-                    ctx.fillStyle = flash ? '#FFFF00' : '#00FF00';
                     for (let i = 0; i < 3; i++) {
-                        const ry = py + T * 0.18 + i * T * 0.33;
-                        this.drawRoundRect(px + T * 0.25, ry, T * 0.5, T * 0.12, s(2));
-                        ctx.fill();
+                        ctx.fillRect(px + T * 0.25, py + T * 0.15 + i * T * 0.35, T * 0.5, T * 0.08);
                     }
                     break;
 
                 case TILE.BAR:
-                    // Vector metallic bar
-                    const barY = py + T * 0.15;
-                    const barH = T * 0.25;
-                    const barGrad = this.createGradient(px, barY, px, barY + barH, '#C0C0C0', '#606060');
+                    // C64 style: simple horizontal bar
+                    ctx.fillStyle = COLORS.LIGHT_GRAY;
+                    ctx.fillRect(px, py + T * 0.35, T, T * 0.2);
+                    ctx.strokeStyle = COLORS.GRAY;
+                    ctx.lineWidth = s(1);
+                    ctx.strokeRect(px, py + T * 0.35, T, T * 0.2);
+                    break;
 
-                    this.drawRoundRect(px, barY, T, barH, s(3));
-                    ctx.fillStyle = barGrad;
-                    ctx.fill();
-
-                    // Highlight line
-                    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-                    ctx.lineWidth = s(2);
-                    ctx.beginPath();
+                case TILE.TRAP:
+                    // C64 style: dark trap door
+                    ctx.fillStyle = COLORS.BLACK;
+                    ctx.fillRect(px, py, T, T);
+                    ctx.strokeStyle = COLORS.DARK_GRAY;
+                    ctx.lineWidth = s(1);
+                    ctx.strokeRect(px + s(1), py + s(1), T - s(2), T - s(2));
+                    break;
                     ctx.moveTo(px + s(3), barY + s(3));
                     ctx.lineTo(px + T - s(3), barY + s(3));
                     ctx.stroke();
@@ -6427,48 +6838,28 @@
                     break;
 
                 case TILE.GOLD:
-                    // Vector treasure chest
-                    const chestW = T * 0.75;
-                    const chestH = T * 0.5;
-                    const chestX = px + (T - chestW) / 2;
-                    const chestY = py + T * 0.4;
-
-                    // Chest body with gradient
-                    const chestGrad = this.createGradient(chestX, chestY, chestX, chestY + chestH, '#8B4513', '#5D3A1A');
-                    this.drawRoundRect(chestX, chestY, chestW, chestH, s(3));
-                    ctx.fillStyle = chestGrad;
-                    ctx.fill();
-                    ctx.strokeStyle = '#3D2A0A';
+                    // C64 style: simple gold treasure (box shape)
+                    const goldX = px + T * 0.5;
+                    const goldY = py + T * 0.5;
+                    
+                    // Gold box (C64 style)
+                    ctx.fillStyle = COLORS.YELLOW;
+                    ctx.fillRect(px + T * 0.2, py + T * 0.15, T * 0.6, T * 0.7);
+                    
+                    // Dark border
+                    ctx.strokeStyle = COLORS.ORANGE;
                     ctx.lineWidth = s(1);
-                    ctx.stroke();
-
-                    // Chest lid
-                    const lidGrad = this.createGradient(chestX - s(2), chestY - T * 0.2, chestX, chestY, '#A0522D', '#6B3A0A');
-                    this.drawRoundRect(chestX - s(2), chestY - T * 0.25, chestW + s(4), T * 0.28, s(3));
-                    ctx.fillStyle = lidGrad;
+                    ctx.strokeRect(px + T * 0.2, py + T * 0.15, T * 0.6, T * 0.7);
+                    
+                    // Shine line
+                    ctx.fillStyle = COLORS.WHITE;
+                    ctx.fillRect(px + T * 0.25, py + T * 0.2, T * 0.15, T * 0.1);
+                    
+                    // Center dot
+                    ctx.fillStyle = COLORS.RED;
+                    ctx.beginPath();
+                    ctx.arc(goldX, goldY + T * 0.1, T * 0.08, 0, Math.PI * 2);
                     ctx.fill();
-
-                    // Gold coins with glow
-                    const goldGlow = this.createRadialGradient(px + T/2, chestY - T * 0.1, 0, T * 0.3, '#FFFF88', '#FFD700');
-                    this.drawCircle(px + T * 0.35, chestY - T * 0.05, s(4));
-                    ctx.fillStyle = goldGlow;
-                    ctx.fill();
-                    this.drawCircle(px + T * 0.5, chestY - T * 0.1, s(5));
-                    ctx.fill();
-                    this.drawCircle(px + T * 0.65, chestY - T * 0.03, s(4));
-                    ctx.fill();
-
-                    // Lock
-                    this.drawRoundRect(px + T * 0.4, chestY + chestH * 0.3, T * 0.2, T * 0.2, s(2));
-                    ctx.fillStyle = '#FFD700';
-                    ctx.fill();
-                    ctx.strokeStyle = '#B8860B';
-                    ctx.lineWidth = s(1);
-                    ctx.stroke();
-                    break;
-
-                case TILE.TRAP:
-                    this.drawBrick(px, py);
                     break;
             }
         }
@@ -6478,52 +6869,34 @@
             const T = TILE_SIZE;
             const s = (v) => v * SCALE;
 
-            // Mortar background with gradient
-            const mortarGrad = this.createGradient(px, py, px, py + T, '#505050', '#353535');
-            ctx.fillStyle = mortarGrad;
+            // C64 style: simple red brick
+            // Fill with mortar color (dark brown)
+            ctx.fillStyle = COLORS.BROWN;
             ctx.fillRect(px, py, T, T);
 
-            // Draw individual bricks with vector style
-            const drawSingleBrick = (bx, by, bw, bh, shade) => {
-                const brickGrad = this.createGradient(bx, by, bx, by + bh,
-                    `rgb(${180 + shade}, ${80 + shade/2}, ${50 + shade/3})`,
-                    `rgb(${130 + shade}, ${50 + shade/2}, ${30 + shade/3})`);
-
-                this.drawRoundRect(bx, by, bw, bh, s(1.5));
-                ctx.fillStyle = brickGrad;
-                ctx.fill();
-
-                // Highlight
-                ctx.strokeStyle = `rgba(255, 200, 180, 0.4)`;
-                ctx.lineWidth = s(1);
-                ctx.beginPath();
-                ctx.moveTo(bx + s(2), by + s(2));
-                ctx.lineTo(bx + bw - s(2), by + s(2));
-                ctx.stroke();
-
-                // Shadow
-                ctx.strokeStyle = `rgba(0, 0, 0, 0.3)`;
-                ctx.beginPath();
-                ctx.moveTo(bx + s(2), by + bh - s(1));
-                ctx.lineTo(bx + bw - s(2), by + bh - s(1));
-                ctx.stroke();
-            };
-
-            const gap = T * 0.04;
+            // Draw brick pattern (simple red blocks - C64 red)
             const brickH = T * 0.28;
+            const gap = s(1);
 
-            // Row 1 - Two bricks
-            drawSingleBrick(px + gap, py + gap, T * 0.46, brickH, 0);
-            drawSingleBrick(px + T * 0.52, py + gap, T * 0.44, brickH, 10);
+            // Row 1
+            ctx.fillStyle = COLORS.RED;
+            ctx.fillRect(px + gap, py + gap, T * 0.45, brickH);
+            ctx.fillStyle = '#8B6B5C'; // darker red
+            ctx.fillRect(px + T * 0.52, py + gap, T * 0.43, brickH);
 
-            // Row 2 - Three offset bricks
-            drawSingleBrick(px + gap, py + T * 0.36, T * 0.22, brickH, 5);
-            drawSingleBrick(px + T * 0.28, py + T * 0.36, T * 0.46, brickH, 15);
-            drawSingleBrick(px + T * 0.78, py + T * 0.36, T * 0.18, brickH, 8);
+            // Row 2 (offset)
+            ctx.fillStyle = '#8B6B5C';
+            ctx.fillRect(px + gap, py + T * 0.36, T * 0.2, brickH);
+            ctx.fillStyle = COLORS.RED;
+            ctx.fillRect(px + T * 0.28, py + T * 0.36, T * 0.44, brickH);
+            ctx.fillStyle = '#7A5A4A';
+            ctx.fillRect(px + T * 0.78, py + T * 0.36, T * 0.17, brickH);
 
-            // Row 3 - Two bricks
-            drawSingleBrick(px + gap, py + T * 0.68, T * 0.46, brickH, 12);
-            drawSingleBrick(px + T * 0.52, py + T * 0.68, T * 0.44, brickH, 3);
+            // Row 3
+            ctx.fillStyle = '#8B6B5C';
+            ctx.fillRect(px + gap, py + T * 0.68, T * 0.45, brickH);
+            ctx.fillStyle = COLORS.RED;
+            ctx.fillRect(px + T * 0.52, py + T * 0.68, T * 0.43, brickH);
         }
 
         drawBrickPartial(x, y, fillAmt) {
@@ -6535,20 +6908,23 @@
             const startY = py + T - h;
             const s = (v) => v * SCALE;
 
-            // Reforming brick with glow effect
-            const reformGrad = this.createGradient(px, startY, px, startY + h,
-                'rgba(180, 80, 50, 0.9)', 'rgba(120, 50, 30, 0.9)');
+            // C64 style: Simple brick reforming (solid color with border)
+            ctx.fillStyle = COLORS.RED;
+            ctx.fillRect(px + s(1), startY, T - s(2), h);
+            
+            // Border
+            ctx.strokeStyle = COLORS.BROWN;
+            ctx.lineWidth = s(1);
+            ctx.strokeRect(px + s(1), startY, T - s(2), h);
 
-            this.drawRoundRect(px + s(2), startY, T - s(4), h, s(2));
-            ctx.fillStyle = reformGrad;
-            ctx.fill();
-
-            // Glow effect
-            ctx.shadowColor = '#FF6633';
-            ctx.shadowBlur = s(10) * (1 - fillAmt);
-            this.drawRoundRect(px + s(2), startY, T - s(4), h, s(2));
-            ctx.fill();
-            ctx.shadowBlur = 0;
+            // Simple line pattern (C64 style)
+            if (h > T * 0.3) {
+                ctx.fillStyle = COLORS.BROWN;
+                ctx.fillRect(px + s(3), startY + h * 0.3, T - s(6), s(1));
+            }
+            if (h > T * 0.6) {
+                ctx.fillRect(px + s(3), startY + h * 0.6, T - s(6), s(1));
+            }
         }
 
         drawPlayer(p) {
@@ -6558,336 +6934,281 @@
             const py = p.y * T;
             const anim = (p.vx !== 0 || p.vy !== 0) ? Math.floor(p.frame / 2) % 4 : 0;
             const s = (v) => v * SCALE;
+            const dir = p.dir || 1;
 
-            // Animation offsets
-            const armSwing = (anim === 1 || anim === 3 ? 0.12 : 0) * T;
-            const legOffset1 = (anim === 0 || anim === 2 ? 0 : (anim === 1 ? 0.12 : -0.12)) * T;
-            const legOffset2 = -legOffset1;
+            // C64 style: simple stick figure (white)
+            const lineWidth = s(2);
+            ctx.strokeStyle = COLORS.WHITE;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
 
-            // Shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.4)';
-            this.drawRoundRect(px + T * 0.25, py + T * 0.92, T * 0.5, T * 0.06, s(2));
-            ctx.fill();
-
-            // === LEGS ===
-            const legGrad = this.createGradient(px, py + T * 0.6, px + T, py + T * 0.6, '#1E3A5F', '#2E5A8F');
-            this.drawRoundRect(px + T * 0.33 + legOffset1, py + T * 0.62, T * 0.15, T * 0.28, s(2));
-            ctx.fillStyle = legGrad;
-            ctx.fill();
-            this.drawRoundRect(px + T * 0.52 + legOffset2, py + T * 0.62, T * 0.15, T * 0.28, s(2));
-            ctx.fill();
-
-            // === BOOTS ===
-            const bootGrad = this.createGradient(px, py + T * 0.88, px, py + T, '#5D4037', '#3D2817');
-            this.drawRoundRect(px + T * 0.25 + legOffset1, py + T * 0.88, T * 0.25, T * 0.1, s(2));
-            ctx.fillStyle = bootGrad;
-            ctx.fill();
-            this.drawRoundRect(px + T * 0.5 + legOffset2, py + T * 0.88, T * 0.25, T * 0.1, s(2));
-            ctx.fill();
-
-            // === TORSO ===
-            const torsoGrad = this.createGradient(px + T * 0.3, py + T * 0.35, px + T * 0.7, py + T * 0.35, '#1565C0', '#42A5F5');
-            this.drawRoundRect(px + T * 0.3, py + T * 0.35, T * 0.4, T * 0.32, s(3));
-            ctx.fillStyle = torsoGrad;
-            ctx.fill();
-
-            // === ARMS ===
-            const armGrad = this.createGradient(px, py + T * 0.4, px + T, py + T * 0.4, '#1565C0', '#1976D2');
-            // Left arm
-            this.drawRoundRect(px + T * 0.12 - armSwing, py + T * 0.38, T * 0.2, T * 0.22, s(3));
-            ctx.fillStyle = armGrad;
-            ctx.fill();
-            // Right arm
-            this.drawRoundRect(px + T * 0.68 + armSwing, py + T * 0.38, T * 0.2, T * 0.22, s(3));
-            ctx.fill();
-
-            // === HANDS ===
-            const skinColor = '#FFCC99';
-            this.drawCircle(px + T * 0.18 - armSwing, py + T * 0.58, T * 0.08);
-            ctx.fillStyle = skinColor;
-            ctx.fill();
-            this.drawCircle(px + T * 0.82 + armSwing, py + T * 0.58, T * 0.08);
-            ctx.fill();
-
-            // === HEAD ===
-            // Hair
-            const hairGrad = this.createGradient(px + T * 0.3, py, px + T * 0.7, py + T * 0.15, '#6D4C41', '#4E342E');
-            this.drawRoundRect(px + T * 0.28, py + T * 0.02, T * 0.44, T * 0.18, s(4));
-            ctx.fillStyle = hairGrad;
-            ctx.fill();
-
-            // Face
-            const faceGrad = this.createRadialGradient(px + T * 0.5, py + T * 0.22, 0, T * 0.2, '#FFE0BD', '#FFCC99');
-            this.drawRoundRect(px + T * 0.32, py + T * 0.12, T * 0.36, T * 0.25, s(4));
-            ctx.fillStyle = faceGrad;
-            ctx.fill();
-
-            // Eyes
-            const eyeDir = p.dir > 0 ? s(2) : -s(2);
-            ctx.fillStyle = '#FFFFFF';
-            this.drawCircle(px + T * 0.4, py + T * 0.2, T * 0.05);
-            ctx.fill();
-            this.drawCircle(px + T * 0.6, py + T * 0.2, T * 0.05);
-            ctx.fill();
-
-            // Pupils
-            ctx.fillStyle = '#1565C0';
-            this.drawCircle(px + T * 0.4 + eyeDir, py + T * 0.21, T * 0.03);
-            ctx.fill();
-            this.drawCircle(px + T * 0.6 + eyeDir, py + T * 0.21, T * 0.03);
-            ctx.fill();
-
-            // Mouth
-            ctx.strokeStyle = '#CC7766';
-            ctx.lineWidth = s(2);
+            // Head (circle)
+            const headRadius = T * 0.15;
+            const headX = px + T * 0.5 + dir * T * 0.03;
             ctx.beginPath();
-            ctx.arc(px + T * 0.5, py + T * 0.3, T * 0.06, 0.2, Math.PI - 0.2);
+            ctx.arc(headX, py + T * 0.2, headRadius, 0, Math.PI * 2);
             ctx.stroke();
+
+            // Eyes (looking in direction)
+            ctx.fillStyle = COLORS.BLACK;
+            const eyeX1 = headX - dir * T * 0.05;
+            const eyeX2 = headX + dir * T * 0.05;
+            ctx.beginPath();
+            ctx.arc(eyeX1, py + T * 0.18, s(1.5), 0, Math.PI * 2);
+            ctx.arc(eyeX2, py + T * 0.18, s(1.5), 0, Math.PI * 2);
+            ctx.fill();
+
+            // Body (vertical line)
+            ctx.beginPath();
+            ctx.moveTo(px + T * 0.5, py + T * 0.35);
+            ctx.lineTo(px + T * 0.5, py + T * 0.6);
+            ctx.stroke();
+
+            // Arms (based on animation)
+            const armSwing = (anim === 1 || anim === 3) ? T * 0.1 : 0;
+            ctx.beginPath();
+            // Left arm
+            ctx.moveTo(px + T * 0.5, py + T * 0.4);
+            ctx.lineTo(px + T * 0.3 - armSwing, py + T * 0.55);
+            // Right arm
+            ctx.moveTo(px + T * 0.5, py + T * 0.4);
+            ctx.lineTo(px + T * 0.7 + armSwing, py + T * 0.55);
+            ctx.stroke();
+
+            // Legs (based on animation)
+            const legSwing = (anim === 1) ? T * 0.1 : ((anim === 3) ? -T * 0.1 : 0);
+            ctx.beginPath();
+            // Left leg
+            ctx.moveTo(px + T * 0.5, py + T * 0.6);
+            ctx.lineTo(px + T * 0.35 - legSwing, py + T * 0.85);
+            // Right leg
+            ctx.moveTo(px + T * 0.5, py + T * 0.6);
+            ctx.lineTo(px + T * 0.65 + legSwing, py + T * 0.85);
+            ctx.stroke();
+
+            // Apple II style: Gold indicator when carrying gold (flashing)
+            if (p.goldCount > 0) {
+                const goldPulse = Math.sin(this.frameCount * GOLD_ANIM_SPEED) * 0.3 + 0.7;
+                ctx.fillStyle = COLORS.YELLOW;
+                ctx.globalAlpha = goldPulse;
+                ctx.fillRect(px + T * 0.4, py - T * 0.15, T * 0.2, T * 0.15);
+                // Shine effect
+                ctx.fillStyle = COLORS.WHITE;
+                ctx.globalAlpha = goldPulse * 0.8;
+                ctx.fillRect(px + T * 0.42, py - T * 0.13, T * 0.06, T * 0.04);
+                ctx.strokeStyle = COLORS.ORANGE;
+                ctx.lineWidth = s(1);
+                ctx.strokeRect(px + T * 0.4, py - T * 0.15, T * 0.2, T * 0.15);
+                ctx.globalAlpha = 1;
+            }
+
+            // Death animation - falling effect
+            if (p.dying) {
+                const deathFrame = Math.min(p.deathTimer / DEATH_DELAY_FRAMES, 1);
+                ctx.globalAlpha = 1 - deathFrame;
+                ctx.strokeStyle = COLORS.RED;
+                ctx.lineWidth = s(3);
+                // X eyes
+                ctx.beginPath();
+                ctx.moveTo(headX - T * 0.08, py + T * 0.15);
+                ctx.lineTo(headX + T * 0.08, py + T * 0.23);
+                ctx.moveTo(headX + T * 0.08, py + T * 0.15);
+                ctx.lineTo(headX - T * 0.08, py + T * 0.23);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
         }
 
         drawEnemy(e) {
             const ctx = this.ctx;
             const T = TILE_SIZE;
+            const px = e.x * T;
+            const py = e.y * T;
             const anim = (e.vx !== 0 || e.vy !== 0) ? Math.floor(e.frame / 2) % 4 : 0;
             const s = (v) => v * SCALE;
 
             if (e.trapped > 0) {
-                // Trapped in hole
+                // Apple II style: trapped enemy with more detailed animation
                 const tileX = Math.floor(e.x);
                 const tileY = Math.floor(e.y);
-                const px = tileX * T;
-                const py = tileY * T;
-                const armWave = Math.floor(this.frameCount / 8) % 2;
-                const blink = e.trapped < 40 && Math.floor(this.frameCount / 6) % 2;
-
-                // Dark hole
-                const holeGrad = this.createRadialGradient(px + T/2, py + T/2, 0, T * 0.6, '#202030', '#101020');
-                this.drawRoundRect(px + s(2), py + s(2), T - s(4), T - s(4), s(4));
-                ctx.fillStyle = holeGrad;
+                const hx = tileX * T;
+                const hy = tileY * T;
+                
+                // Dark hole effect
+                ctx.fillStyle = COLORS.BLACK;
+                ctx.fillRect(hx + s(1), hy + s(1), T - s(2), T - s(2));
+                ctx.strokeStyle = COLORS.BROWN;
+                ctx.lineWidth = s(1);
+                ctx.strokeRect(hx + s(1), hy + s(1), T - s(2), T - s(2));
+                
+                // Pulsing red circle - faster pulse for urgency
+                const pulse = Math.sin(this.frameCount * TRAP_PULSE_SPEED) * 0.3 + 0.7;
+                ctx.fillStyle = COLORS.RED;
+                ctx.globalAlpha = pulse;
+                ctx.beginPath();
+                ctx.arc(hx + T * 0.5, hy + T * 0.55, T * 0.22, 0, Math.PI * 2);
                 ctx.fill();
-
-                // Body in hole
-                const bodyGrad = this.createGradient(px + T * 0.3, py + T * 0.4, px + T * 0.7, py + T * 0.4, '#CD5C5C', '#8B0000');
-                this.drawRoundRect(px + T * 0.3, py + T * 0.4, T * 0.4, T * 0.45, s(3));
-                ctx.fillStyle = bodyGrad;
+                
+                // Inner glow
+                ctx.globalAlpha = pulse * 0.5;
+                ctx.beginPath();
+                ctx.arc(hx + T * 0.5, hy + T * 0.55, T * 0.12, 0, Math.PI * 2);
                 ctx.fill();
-
-                // Head
-                const headGrad = this.createGradient(px + T * 0.25, py + T * 0.1, px + T * 0.75, py + T * 0.1, '#CD5C5C', '#8B0000');
-                this.drawRoundRect(px + T * 0.25, py + T * 0.1, T * 0.5, T * 0.32, s(4));
-                ctx.fillStyle = headGrad;
-                ctx.fill();
-
-                // Helmet
-                this.drawRoundRect(px + T * 0.22, py + T * 0.05, T * 0.56, T * 0.12, s(3));
-                ctx.fillStyle = '#5A5A5A';
-                ctx.fill();
-
-                // Eyes
-                if (!blink) {
-                    const eyeGlow = this.createRadialGradient(px + T * 0.38, py + T * 0.22, 0, T * 0.08, '#FFFF00', '#FF0000');
-                    this.drawCircle(px + T * 0.38, py + T * 0.22, T * 0.07);
-                    ctx.fillStyle = eyeGlow;
-                    ctx.fill();
-                    this.drawCircle(px + T * 0.62, py + T * 0.22, T * 0.07);
-                    ctx.fill();
-                }
-
-                // Arms reaching up
-                const armY = py + T * 0.15 - (armWave ? T * 0.05 : 0);
-                this.drawRoundRect(px + T * 0.1, armY, T * 0.15, T * 0.35, s(3));
-                ctx.fillStyle = '#8B0000';
-                ctx.fill();
-                this.drawRoundRect(px + T * 0.75, armY + (armWave ? T * 0.05 : 0), T * 0.15, T * 0.35, s(3));
-                ctx.fill();
-
-                // Hole edge
-                ctx.strokeStyle = '#501010';
-                ctx.lineWidth = s(3);
-                this.drawRoundRect(px + s(1), py + s(1), T - s(2), T - s(2), s(3));
-                ctx.stroke();
-            } else {
-                // Normal enemy
-                const px = e.x * T;
-                const py = e.y * T;
-
-                const armSwing = (anim === 1 || anim === 3 ? 0.12 : 0) * T;
-                const legOffset1 = (anim === 0 || anim === 2 ? 0 : (anim === 1 ? 0.12 : -0.12)) * T;
-                const legOffset2 = -legOffset1;
-
-                // Golden aura when carrying gold
-                if (e.hasGold) {
-                    const glowPulse = 0.3 + 0.2 * Math.sin(this.frameCount * 0.15);
-                    ctx.save();
-                    ctx.shadowColor = '#FFD700';
-                    ctx.shadowBlur = s(15);
-                    ctx.fillStyle = `rgba(255, 215, 0, ${glowPulse})`;
-                    this.drawRoundRect(px + T * 0.15, py + T * 0.05, T * 0.7, T * 0.85, s(6));
-                    ctx.fill();
-                    ctx.restore();
-                }
-
-                // Shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                this.drawRoundRect(px + T * 0.2, py + T * 0.92, T * 0.6, T * 0.06, s(2));
-                ctx.fill();
-
-                // === LEGS ===
-                const legGrad = this.createGradient(px, py + T * 0.6, px + T, py + T * 0.6, '#4A0000', '#6A2020');
-                this.drawRoundRect(px + T * 0.33 + legOffset1, py + T * 0.62, T * 0.15, T * 0.28, s(2));
-                ctx.fillStyle = legGrad;
-                ctx.fill();
-                this.drawRoundRect(px + T * 0.52 + legOffset2, py + T * 0.62, T * 0.15, T * 0.28, s(2));
-                ctx.fill();
-
-                // === BOOTS ===
-                this.drawRoundRect(px + T * 0.25 + legOffset1, py + T * 0.88, T * 0.25, T * 0.1, s(2));
-                ctx.fillStyle = '#2A2A2A';
-                ctx.fill();
-                this.drawRoundRect(px + T * 0.5 + legOffset2, py + T * 0.88, T * 0.25, T * 0.1, s(2));
-                ctx.fill();
-
-                // === TORSO (Armor) ===
-                const armorGrad = this.createGradient(px + T * 0.25, py + T * 0.35, px + T * 0.75, py + T * 0.6, '#CD5C5C', '#8B0000');
-                this.drawRoundRect(px + T * 0.25, py + T * 0.35, T * 0.5, T * 0.32, s(4));
-                ctx.fillStyle = armorGrad;
-                ctx.fill();
-
-                // Chest plate
-                this.drawRoundRect(px + T * 0.35, py + T * 0.42, T * 0.3, T * 0.18, s(3));
-                ctx.fillStyle = e.hasGold ? '#FFD700' : '#5A5A5A';
-                ctx.fill();
-
-                // === ARMS ===
-                this.drawRoundRect(px + T * 0.08 - armSwing, py + T * 0.38, T * 0.2, T * 0.25, s(3));
-                ctx.fillStyle = '#8B0000';
-                ctx.fill();
-                this.drawRoundRect(px + T * 0.72 + armSwing, py + T * 0.38, T * 0.2, T * 0.25, s(3));
-                ctx.fill();
-
-                // Gloves
-                this.drawRoundRect(px + T * 0.08 - armSwing, py + T * 0.58, T * 0.15, T * 0.12, s(2));
-                ctx.fillStyle = '#3A3A3A';
-                ctx.fill();
-                this.drawRoundRect(px + T * 0.77 + armSwing, py + T * 0.58, T * 0.15, T * 0.12, s(2));
-                ctx.fill();
-
-                // Gold nugget in hand when carrying gold
-                if (e.hasGold) {
-                    const goldGrad = this.createRadialGradient(
-                        px + T * 0.85 + armSwing, py + T * 0.52,
-                        0, T * 0.12,
-                        '#FFFF00', '#DAA520'
-                    );
-                    this.drawRoundRect(px + T * 0.78 + armSwing, py + T * 0.45, T * 0.18, T * 0.15, s(3));
-                    ctx.fillStyle = goldGrad;
-                    ctx.fill();
-                    // Gold shine
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-                    this.drawCircle(px + T * 0.82 + armSwing, py + T * 0.48, T * 0.03);
-                    ctx.fill();
-                }
-
-                // === HEAD ===
-                // Helmet
-                this.drawRoundRect(px + T * 0.22, py + T * 0.02, T * 0.56, T * 0.15, s(4));
-                ctx.fillStyle = '#5A5A5A';
-                ctx.fill();
-
-                // Face
-                const faceGrad = this.createGradient(px + T * 0.25, py + T * 0.1, px + T * 0.75, py + T * 0.35, '#CD5C5C', '#8B0000');
-                this.drawRoundRect(px + T * 0.25, py + T * 0.12, T * 0.5, T * 0.28, s(4));
-                ctx.fillStyle = faceGrad;
-                ctx.fill();
-
-                // Visor
-                this.drawRoundRect(px + T * 0.3, py + T * 0.16, T * 0.4, T * 0.12, s(3));
-                ctx.fillStyle = '#000000';
-                ctx.fill();
-
-                // Glowing eyes
-                const eyeGlow = Math.floor(this.frameCount / 8) % 2;
-                const eyeColor = this.createRadialGradient(px + T * 0.4, py + T * 0.2, 0, T * 0.05,
-                    eyeGlow ? '#FF0000' : '#FFFF00', eyeGlow ? '#880000' : '#888800');
-                this.drawCircle(px + T * 0.4, py + T * 0.2, T * 0.04);
-                ctx.fillStyle = eyeColor;
-                ctx.fill();
-                this.drawCircle(px + T * 0.6, py + T * 0.2, T * 0.04);
-                ctx.fill();
-
-                // Mouth grill
-                ctx.strokeStyle = '#3A3A3A';
+                ctx.globalAlpha = 1;
+                
+                // Arms reaching up - more animated
+                const armWave = Math.sin(this.frameCount * 0.2) * T * 0.05;
+                ctx.strokeStyle = COLORS.RED;
                 ctx.lineWidth = s(2);
-                for (let i = 0; i < 3; i++) {
-                    ctx.beginPath();
-                    ctx.moveTo(px + T * (0.38 + i * 0.08), py + T * 0.32);
-                    ctx.lineTo(px + T * (0.38 + i * 0.08), py + T * 0.38);
-                    ctx.stroke();
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(hx + T * 0.35, hy + T * 0.4);
+                ctx.lineTo(hx + T * 0.2 - armWave, hy + T * 0.2);
+                ctx.moveTo(hx + T * 0.65, hy + T * 0.4);
+                ctx.lineTo(hx + T * 0.8 + armWave, hy + T * 0.2);
+                ctx.stroke();
+
+                // Show warning when about to escape (last 60 frames)
+                if (e.trapped < 60) {
+                    const warningPulse = Math.sin(this.frameCount * 0.5) * 0.5 + 0.5;
+                    ctx.fillStyle = COLORS.YELLOW;
+                    ctx.globalAlpha = warningPulse;
+                    ctx.font = `${Math.floor(10 * SCALE)}px Courier New`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('!', hx + T * 0.5, hy - T * 0.1);
+                    ctx.globalAlpha = 1;
                 }
+                return;
+            }
+
+            // C64 style: red stick figure enemy
+            const lineWidth = s(2);
+            ctx.strokeStyle = COLORS.RED;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+
+            // Head (circle with helmet)
+            const headRadius = T * 0.15;
+            ctx.beginPath();
+            ctx.arc(px + T * 0.5, py + T * 0.2, headRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Helmet line
+            ctx.beginPath();
+            ctx.moveTo(px + T * 0.35, py + T * 0.12);
+            ctx.lineTo(px + T * 0.65, py + T * 0.12);
+            ctx.stroke();
+
+            // Body (vertical line)
+            ctx.beginPath();
+            ctx.moveTo(px + T * 0.5, py + T * 0.35);
+            ctx.lineTo(px + T * 0.5, py + T * 0.6);
+            ctx.stroke();
+
+            // Arms (based on animation)
+            const armSwing = (anim === 1 || anim === 3) ? T * 0.1 : 0;
+            ctx.beginPath();
+            // Left arm
+            ctx.moveTo(px + T * 0.5, py + T * 0.4);
+            ctx.lineTo(px + T * 0.3 - armSwing, py + T * 0.55);
+            // Right arm
+            ctx.moveTo(px + T * 0.5, py + T * 0.4);
+            ctx.lineTo(px + T * 0.7 + armSwing, py + T * 0.55);
+            ctx.stroke();
+
+            // Legs (based on animation)
+            const legSwing = (anim === 1) ? T * 0.1 : ((anim === 3) ? -T * 0.1 : 0);
+            ctx.beginPath();
+            // Left leg
+            ctx.moveTo(px + T * 0.5, py + T * 0.6);
+            ctx.lineTo(px + T * 0.35 - legSwing, py + T * 0.85);
+            // Right leg
+            ctx.moveTo(px + T * 0.5, py + T * 0.6);
+            ctx.lineTo(px + T * 0.65 + legSwing, py + T * 0.85);
+            ctx.stroke();
+
+            // Apple II style: Gold indicator when carrying gold (flashing yellow box)
+            if (e.hasGold) {
+                const goldPulse = Math.sin(this.frameCount * GOLD_ANIM_SPEED) * 0.3 + 0.7;
+                ctx.fillStyle = COLORS.YELLOW;
+                ctx.globalAlpha = goldPulse;
+                ctx.fillRect(px + T * 0.4, py - T * 0.1, T * 0.2, T * 0.15);
+                // Shine effect
+                ctx.fillStyle = COLORS.WHITE;
+                ctx.globalAlpha = goldPulse * 0.7;
+                ctx.fillRect(px + T * 0.42, py - T * 0.08, T * 0.06, T * 0.04);
+                ctx.strokeStyle = COLORS.ORANGE;
+                ctx.lineWidth = s(1);
+                ctx.strokeRect(px + T * 0.4, py - T * 0.1, T * 0.2, T * 0.15);
+                ctx.globalAlpha = 1;
             }
         }
 
         gameLoop() {
-            const now = performance.now();
-            const delta = now - this.lastTime;
+            try {
+                const now = performance.now();
+                const delta = now - this.lastTime;
 
-            if (delta >= this.tickRate) {
-                // Demo mode timer - 30초 무입력 시 데모 전환
-                if (!this.demoMode) {
-                    const idleTime = this.frameCount - this.lastInputTime;
-                    if (idleTime >= this.idleTimeoutFrames) {
-                        this.startDemo();
-                    }
-                }
-
-                // Demo AI update
-                if (this.demoMode && this.gameState === STATE.PLAYING) {
-                    this.updateDemo();
-                }
-
-                // Handle frame-based timers
-                if (this.gameState === STATE.DYING) {
-                    this.deathTimer--;
-                    if (this.deathTimer <= 0) {
-                        if (this.demoMode) {
-                            // 데모에서 죽으면 다른 레벨로
-                            this.currentLevel = Math.floor(Math.random() * Math.min(10, this.activeLevels.length)) + 1;
-                            this.loadLevel(this.currentLevel);
-                            this.gameState = STATE.PLAYING;
-                            this.showMessage('DEMO - PRESS ENTER TO PLAY');
-                        } else if (this.lives <= 0) {
-                            this.gameState = STATE.GAME_OVER;
-                            this.showMessage('GAME OVER - PRESS ENTER');
-                            this.sound.play('gameover');
-                        } else {
-                            this.loadLevel(this.currentLevel);
-                            this.gameState = STATE.PLAYING;
-                            this.showMessage('');
+                if (delta >= this.tickRate) {
+                    // Demo mode timer - 30초 무입력 시 데모 전환
+                    if (!this.demoMode) {
+                        const idleTime = this.frameCount - this.lastInputTime;
+                        if (idleTime >= this.idleTimeoutFrames) {
+                            this.startDemo();
                         }
                     }
-                }
 
-                if (this.gameState === STATE.LEVEL_COMPLETE) {
-                    this.levelCompleteTimer--;
-                    if (this.levelCompleteTimer <= 0) {
-                        if (this.demoMode) {
-                            // 데모에서 클리어하면 다른 레벨로
-                            this.currentLevel = Math.floor(Math.random() * Math.min(10, this.activeLevels.length)) + 1;
-                            this.showMessage('DEMO - PRESS ENTER TO PLAY');
-                        }
-                        this.loadLevel(this.currentLevel);
-                        this.gameState = STATE.PLAYING;
-                        if (!this.demoMode) this.showMessage('');
+                    // Demo AI update
+                    if (this.demoMode && this.gameState === STATE.PLAYING) {
+                        this.updateDemo();
                     }
-                }
 
-                this.update();
-                this.render();
-                // Keep frameCount incrementing for animations even when not playing
-                if (this.gameState !== STATE.PLAYING) {
-                    this.frameCount++;
+                    // Handle frame-based timers
+                    if (this.gameState === STATE.DYING) {
+                        this.deathTimer--;
+                        if (this.deathTimer <= 0) {
+                            if (this.demoMode) {
+                                // 데모에서 죽으면 다른 레벨로
+                                this.currentLevel = Math.floor(Math.random() * Math.min(10, this.activeLevels.length)) + 1;
+                                this.loadLevel(this.currentLevel);
+                                this.gameState = STATE.PLAYING;
+                                this.showMessage('DEMO - PRESS ENTER TO PLAY');
+                            } else if (this.lives <= 0) {
+                                this.gameState = STATE.GAME_OVER;
+                                this.showMessage('GAME OVER - PRESS ENTER');
+                                this.sound.play('gameover');
+                            } else {
+                                this.loadLevel(this.currentLevel);
+                                this.gameState = STATE.PLAYING;
+                                this.showMessage('');
+                            }
+                        }
+                    }
+
+                    if (this.gameState === STATE.LEVEL_COMPLETE) {
+                        this.levelCompleteTimer--;
+                        if (this.levelCompleteTimer <= 0) {
+                            if (this.demoMode) {
+                                // 데모에서 클리어하면 다른 레벨로
+                                this.currentLevel = Math.floor(Math.random() * Math.min(10, this.activeLevels.length)) + 1;
+                                this.showMessage('DEMO - PRESS ENTER TO PLAY');
+                            }
+                            this.loadLevel(this.currentLevel);
+                            this.gameState = STATE.PLAYING;
+                            if (!this.demoMode) this.showMessage('');
+                        }
+                    }
+
+                    this.update();
+                    this.render();
+                    // Keep frameCount incrementing for animations even when not playing
+                    if (this.gameState !== STATE.PLAYING) {
+                        this.frameCount++;
+                    }
+                    this.lastTime = now - (delta % this.tickRate);
                 }
-                this.lastTime = now - (delta % this.tickRate);
+            } catch (e) {
+                console.error('Game loop error:', e);
             }
 
             requestAnimationFrame(() => this.gameLoop());
