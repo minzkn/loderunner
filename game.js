@@ -4216,7 +4216,7 @@
             this.keySource = {};  // Track input source: 'keyboard' or 'touch'
             this.gameState = STATE.TITLE;
             this.score = 0;
-            this.lives = 5;
+            this.lives = 99;
             this.currentLevel = 1;
             this.speedMultiplier = 1.0;  // C64: increases after completing all 150 levels
 
@@ -4492,6 +4492,19 @@
                 // 'M' key to toggle sound
                 if (isDown && e.keyCode === 77) {
                     this.sound.toggle();
+                    e.preventDefault();
+                }
+
+                // Shift+N: Next level, Shift+P: Previous level
+                if (isDown && (e.keyCode === 78 || e.keyCode === 80) && e.shiftKey) {
+                    if (e.keyCode === 78) {
+                        this.currentLevel++;
+                    } else {
+                        this.currentLevel = Math.max(1, this.currentLevel - 1);
+                    }
+                    this.loadLevel(this.currentLevel);
+                    this.gameState = STATE.PLAYING;
+                    this.showMessage('LEVEL ' + this.currentLevel);
                     e.preventDefault();
                 }
 
@@ -5131,7 +5144,7 @@
             this.demoMode = false;
             this.lastInputTime = this.frameCount;  // 입력 타이머 리셋
             this.score = 0;
-            this.lives = 5;
+            this.lives = 99;
             this.currentLevel = 1;
             this.updateUI();
             this.loadLevel(this.currentLevel);
@@ -6164,7 +6177,7 @@
                 this.speedMultiplier = Math.min(this.speedMultiplier + 0.15, 2.0); // Max 2x speed
                 this.currentLevel = 1;
                 this.score = 0;
-                this.lives = 5;
+this.lives = 99;
                 this.showMessage('SPEED UP! ' + Math.round(this.speedMultiplier * 100) + '%');
             } else {
                 this.currentLevel++;
