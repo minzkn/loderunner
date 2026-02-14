@@ -74,7 +74,7 @@
 
     // ============================================
     // ORIGINAL LODE RUNNER LEVELS (1983)
-    // Apple II 디스크 이미지에서 추출 - 150개 레벨
+    // Apple II disk image data - 150 levels
     // ============================================
 
     const LEVELS = [
@@ -2932,7 +2932,7 @@
 
 
     // ============================================
-    // CHAMPIONSHIP LODE RUNNER (1984) - 50개 레벨
+    // CHAMPIONSHIP LODE RUNNER (1984) - 50 levels
     // ============================================
 
     const CHAMPIONSHIP_LEVELS = [
@@ -4229,13 +4229,18 @@
             this.demoMode = false;
             this.demoMoveTimer = 0;
             this.demoTargetGold = null;
-            this.lastDemoDir = 'H';  // 마지막 이동 방향 (H: 수평, V: 수직)
-            this.demoPositionHistory = [];  // 최근 위치 히스토리 (교착 감지용)
-            this.demoStuckCounter = 0;  // 교착 카운터
-            this.lastInputTime = 0;  // 마지막 사용자 입력 시간 (frameCount 기준)
-            this.idleTimeoutFrames = 900;  // 30초 (30fps * 30초)
+            this.lastDemoDir = 'H';  // Last movement direction (H: horizontal, V: vertical)
+            this.demoPositionHistory = [];  // Recent position history (for deadlock detection)
+            this.demoStuckCounter = 0;  // Deadlock counter
+            this.lastInputTime = 0;  // Last user input time (frameCount based)
+            this.idleTimeoutFrames = 900;  // 30 seconds (30fps * 30sec)
 
             this.sound = new Sound();
+
+            // Gradient cache for performance
+            this.gradientCache = {};
+            this.gradientCacheHits = 0;
+            this.gradientCacheMisses = 0;
 
             this.setupInput();
             this.setupResponsiveCanvas();
@@ -4325,16 +4330,34 @@
         }
 
         createGradient(x1, y1, x2, y2, color1, color2) {
+            const key = `L:${x1},${y1},${x2},${y2},${color1},${color2}`;
+            if (this.gradientCache[key]) {
+                this.gradientCacheHits++;
+                return this.gradientCache[key];
+            }
+            this.gradientCacheMisses++;
             const grad = this.ctx.createLinearGradient(x1, y1, x2, y2);
             grad.addColorStop(0, color1);
             grad.addColorStop(1, color2);
+            if (Object.keys(this.gradientCache).length < 500) {
+                this.gradientCache[key] = grad;
+            }
             return grad;
         }
 
         createRadialGradient(x, y, r1, r2, color1, color2) {
+            const key = `R:${x},${y},${r1},${r2},${color1},${color2}`;
+            if (this.gradientCache[key]) {
+                this.gradientCacheHits++;
+                return this.gradientCache[key];
+            }
+            this.gradientCacheMisses++;
             const grad = this.ctx.createRadialGradient(x, y, r1, x, y, r2);
             grad.addColorStop(0, color1);
             grad.addColorStop(1, color2);
+            if (Object.keys(this.gradientCache).length < 500) {
+                this.gradientCache[key] = grad;
+            }
             return grad;
         }
 
@@ -4349,7 +4372,7 @@
                 13: 'ENTER', 82: 'RESTART', 27: 'ESC'
             };
 
-            // 키 표시 업데이트 함수
+            // Key display update function
             const updateKeyDisplay = (key, isActive) => {
                 const keyEl = document.querySelector(`#key-display .key-item[data-key="${key}"]`);
                 if (keyEl) {
@@ -4364,7 +4387,7 @@
             const handleKey = (e, isDown) => {
                 if (e.isComposing || e.keyCode === 229) return;
 
-                // 사용자 입력 시간 업데이트 (데모 타이머 리셋)
+                // Update user input time (demo timer reset)
                 if (isDown) {
                     this.lastInputTime = this.frameCount;
                 }
@@ -4373,17 +4396,17 @@
                 if (key) {
                     this.keys[key] = isDown;
                     e.preventDefault();
-                    // 키 표시 업데이트
+                    // Update key display
                     updateKeyDisplay(key, isDown);
                 }
 
-                // 'C' 키로 게임 모드 전환 (타이틀에서만)
+                // 'C' key to toggle game mode (title screen only)
                 if (isDown && e.keyCode === 67 && this.gameState === STATE.TITLE) {
                     this.toggleGameMode();
                     e.preventDefault();
                 }
 
-                // 'M' 키로 사운드 토글
+                // 'M' key to toggle sound
                 if (isDown && e.keyCode === 77) {
                     this.sound.toggle();
                     e.preventDefault();
@@ -4393,7 +4416,7 @@
                     this.sound.init();
 
                     if (key === 'ENTER') {
-                        // 데모 모드에서 ENTER 누르면 게임 시작
+                        // Press ENTER in demo mode to start game
                         if (this.demoMode) {
                             this.demoMode = false;
                             this.showTitle();
@@ -4455,7 +4478,7 @@
         showTitle() {
             this.gameState = STATE.TITLE;
             this.demoMode = false;
-            this.lastInputTime = this.frameCount;  // 입력 타이머 리셋
+            this.lastInputTime = this.frameCount;  // Reset input timer
             this.activeLevels = this.gameMode === 'championship' ? CHAMPIONSHIP_LEVELS : LEVELS;
             this.loadLevel(1);
             this.updateTitleMessage();

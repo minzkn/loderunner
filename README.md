@@ -108,9 +108,9 @@ python -m http.server 8080
 ### 파일 구조
 ```
 loderunner/
-├── index.html      # 게임 컨테이너
-├── style.css       # 반응형 VGA 스타일
-├── game.js         # 게임 로직 (150개 레벨 포함)
+├── index.html      # 게임 컨테이너 (57줄)
+├── style.css       # 반응형 VGA 스타일 (255줄)
+├── game.js         # 게임 로직 (6646줄)
 ├── README.md       # 이 문서
 ├── CLAUDE.md       # Claude Code 가이드
 └── .claude/skills/ # 커스텀 스킬
@@ -121,7 +121,7 @@ loderunner/
 - 기본 타일 크기: 24x24 픽셀
 - 기본 캔버스 해상도: 672x384
 - 프레임 레이트: 30 FPS
-- 반응형 스케일: 0.8x ~ 3.0x
+- 반응형 스케일: 0.5x ~ 2.5x
 
 ### 주요 기능
 - 원작 150개 레벨 (Apple II 디스크 이미지에서 추출)
