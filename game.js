@@ -52,9 +52,7 @@
         BLUE: '#0000AA'
     };
 
-    // Animation frames for smoother movement
-    const PLAYER_ANIM_FRAMES = 8;
-    const ENEMY_ANIM_FRAMES = 8;
+    // Animation timing constants
     const GOLD_ANIM_SPEED = 0.15;
     const TRAP_PULSE_SPEED = 0.3;
 
@@ -4235,6 +4233,9 @@
             // Stuck detection
             this.stuckCheckTimer = 0;
             this.stuckReason = '';
+            this.impossibleReasonPending = '';
+            this.impossibleConfirmCount = 0;
+            this.impossibleConfirmThreshold = 4; // 4 checks * 30 frames ~= 4s
 
             // Frame-based timers (replaces setTimeout)
             this.deathTimer = 0;
@@ -4269,6 +4270,11 @@
             this.gradientCacheHits = 0;
             this.gradientCacheMisses = 0;
 
+            const query = new URLSearchParams(window.location.search);
+            this.failFast = query.get('failfast') === '1';
+            this.runtimeHalted = false;
+            this.runtimeError = null;
+
             this.setupInput();
             this.setupResponsiveCanvas();
             this.sound.setupToggle();
@@ -4290,6 +4296,55 @@
 
             this.showTitle();
             this.gameLoop();
+        }
+
+        handleRuntimeError(source, error) {
+            if (this.runtimeError) return;
+            this.runtimeError = { source, error };
+            console.error(`[${source}]`, error);
+            this.runtimeHalted = true;
+            if (this.gameState === STATE.PLAYING) {
+                this.gameState = STATE.PAUSED;
+            }
+
+            const detail = (error && error.message) ? error.message : String(error);
+            this.showMessage('RUNTIME ERROR - CHECK CONSOLE');
+            this.showDeathOverlay('RUNTIME ERROR', `${source}: ${detail}`);
+        }
+
+        validateRuntimeState() {
+            if (!this.player) return;
+
+            const finite = (n) => Number.isFinite(n);
+            const inside = (v, min, max) => v >= min && v <= max;
+
+            const p = this.player;
+            if (!finite(p.x) || !finite(p.y) || !finite(p.vx) || !finite(p.vy)) {
+                throw new Error('PLAYER_NON_FINITE_STATE');
+            }
+            if (!inside(p.x, 0, LEVEL_WIDTH - 1) || !inside(p.y, 0, LEVEL_HEIGHT - 1)) {
+                throw new Error('PLAYER_OUT_OF_BOUNDS');
+            }
+
+            for (let i = 0; i < this.enemies.length; i++) {
+                const e = this.enemies[i];
+                if (!finite(e.x) || !finite(e.y) || !finite(e.vx) || !finite(e.vy)) {
+                    throw new Error(`ENEMY_NON_FINITE_STATE_${i}`);
+                }
+                if (!inside(e.x, 0, LEVEL_WIDTH - 1) || !inside(e.y, 0, LEVEL_HEIGHT - 1)) {
+                    throw new Error(`ENEMY_OUT_OF_BOUNDS_${i}`);
+                }
+            }
+
+            for (let i = 0; i < this.dugHoles.length; i++) {
+                const h = this.dugHoles[i];
+                if (!Number.isInteger(h.x) || !Number.isInteger(h.y) || !Number.isInteger(h.timer)) {
+                    throw new Error(`HOLE_INVALID_STATE_${i}`);
+                }
+                if (h.x < 0 || h.x >= LEVEL_WIDTH || h.y < 0 || h.y >= LEVEL_HEIGHT) {
+                    throw new Error(`HOLE_OUT_OF_BOUNDS_${i}`);
+                }
+            }
         }
 
         setupResponsiveCanvas() {
@@ -4455,6 +4510,14 @@
                     this.lastInputTime = this.frameCount;
                 }
 
+                // Original C64 behavior: Ctrl+A aborts current attempt (lose one life)
+                if (isDown && e.ctrlKey && e.keyCode === 65) {
+                    this.sound.init();
+                    this.handleRestartKey();
+                    e.preventDefault();
+                    return;
+                }
+
                 const key = keyCodeMap[e.keyCode];
                 if (key) {
                     // Prioritize newer input source
@@ -4583,12 +4646,6 @@
                 'ENTER': () => this.handleEnterKey(),
                 'RESTART': () => this.handleRestartKey(),
                 'ESC': () => this.handlePauseKey()
-            };
-
-            const keyCodeMap = {
-                'LEFT': 37, 'UP': 38, 'RIGHT': 39, 'DOWN': 40,
-                'DIGL': 90, 'DIGR': 88,
-                'ENTER': 13, 'RESTART': 82, 'ESC': 27
             };
 
             buttons.forEach(btn => {
@@ -4765,12 +4822,10 @@
                 // 파기 가능한 곳 찾아서 파기
                 const digOptions = [];
                 if (hasFloor && px > 0 && !this.isSolid(px - 1, py)) {
-                    const tile = this.getTile(px - 1, py + 1);
-                    if (tile === TILE.BRICK || tile === TILE.TRAP) digOptions.push('DIGL');
+                    if (this.canDigTile(px - 1, py + 1)) digOptions.push('DIGL');
                 }
                 if (hasFloor && px < LEVEL_WIDTH - 1 && !this.isSolid(px + 1, py)) {
-                    const tile = this.getTile(px + 1, py + 1);
-                    if (tile === TILE.BRICK || tile === TILE.TRAP) digOptions.push('DIGR');
+                    if (this.canDigTile(px + 1, py + 1)) digOptions.push('DIGR');
                 }
 
                 if (digOptions.length > 0) {
@@ -4887,15 +4942,13 @@
                     // 파기를 통한 경로 (한 번만)
                     if (allowDig && !dug && canMove) {
                         if (x > 0 && !this.isSolidOrBrick(x - 1, y)) {
-                            const digTile = this.getTile(x - 1, y + 1);
-                            if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
+                            if (this.canDigTile(x - 1, y + 1)) {
                                 // 파기 후 그 방향으로 이동 + 낙하
                                 moves.push({ x: x - 1, y: y + 1, action: 'DIGL', dig: true });
                             }
                         }
                         if (x < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(x + 1, y)) {
-                            const digTile = this.getTile(x + 1, y + 1);
-                            if (digTile === TILE.BRICK || digTile === TILE.TRAP) {
+                            if (this.canDigTile(x + 1, y + 1)) {
                                 moves.push({ x: x + 1, y: y + 1, action: 'DIGR', dig: true });
                             }
                         }
@@ -4986,12 +5039,10 @@
             // 파기 옵션 추가
             if (hasFloor) {
                 if (px > 0 && !this.isSolidOrBrick(px - 1, py)) {
-                    const tile = this.getTile(px - 1, py + 1);
-                    if (tile === TILE.BRICK || tile === TILE.TRAP) possibleMoves.push('DIGL');
+                    if (this.canDigTile(px - 1, py + 1)) possibleMoves.push('DIGL');
                 }
                 if (px < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(px + 1, py)) {
-                    const tile = this.getTile(px + 1, py + 1);
-                    if (tile === TILE.BRICK || tile === TILE.TRAP) possibleMoves.push('DIGR');
+                    if (this.canDigTile(px + 1, py + 1)) possibleMoves.push('DIGR');
                 }
             }
 
@@ -5194,6 +5245,8 @@
             this.player = null;
             this.stuckCheckTimer = 0;
             this.levelStartGrace = 90; // 3 seconds grace period before stuck check
+            this.impossibleReasonPending = '';
+            this.impossibleConfirmCount = 0;
             this.hideDeathOverlay();
 
             for (let y = 0; y < LEVEL_HEIGHT; y++) {
@@ -5278,6 +5331,18 @@
             return this.getTile(x, y) === TILE.TRAP;
         }
 
+        isDiggableTile(x, y) {
+            const t = this.getTile(x, y);
+            return t === TILE.BRICK || t === TILE.TRAP;
+        }
+
+        canDigTile(x, y) {
+            if (!this.isDiggableTile(x, y)) return false;
+            const above = this.getTile(x, y - 1);
+            // Original rule: cannot dig when ladder/bar is directly above the target tile
+            return above !== TILE.LADDER && above !== TILE.ESCAPE_LADDER && above !== TILE.BAR;
+        }
+
         isInHole(x, y) {
             const ix = Math.floor(x);
             const iy = Math.floor(y);
@@ -5356,9 +5421,7 @@
         }
 
         dig(digX, digY) {
-            // Can dig BRICK and TRAP tiles
-            const tile = this.getTile(digX, digY);
-            if (tile === TILE.BRICK || tile === TILE.TRAP) {
+            if (this.canDigTile(digX, digY)) {
                 this.setTile(digX, digY, TILE.EMPTY);
                 this.dugHoles.push({ x: digX, y: digY, timer: HOLE_FILL_TIME }); // 300 frames at 30fps (10 seconds - original Apple II)
                 this.sound.play('dig');
@@ -5502,7 +5565,6 @@
 
             const onLadder = this.isLadder(px, py);
             const onBar = this.isBar(px, py) || this.isBar(px, py - 1);
-            const belowIsBar = this.isBar(px, py + 1);
             
             // False Floor (TRAP) check - falls through after 1 frame delay
             const onFalseFloor = this.isFalseFloor(px, py + 1);
@@ -5528,6 +5590,7 @@
                 p.trapped--;
                 const holeX = Math.floor(p.x);
                 const holeY = Math.floor(p.y);
+                const trappedEnemy = this.getTrappedEnemyAtTile(holeX, holeY + 1);
                 
                 // Lock player in hole position
                 p.x = holeX + 0.5;
@@ -5701,7 +5764,8 @@
                 // Validate dig position and conditions
                 if ((onGround || onLadder || onBar) &&
                     digX >= 0 && digX < LEVEL_WIDTH && digY >= 0 && digY < LEVEL_HEIGHT &&
-                    !this.isSolidForPlayer(px + digDir, py)) {
+                    !this.isSolidForPlayer(px + digDir, py) &&
+                    this.canDigTile(digX, digY)) {
                     this.dig(digX, digY);
                 }
                 keys.DIGL = false;
@@ -5832,6 +5896,13 @@
                 // Check for trapped player or enemy below (can walk on their head)
                 const onTrappedEntity = this.getTrappedEntityAtTile(ex, ey + 1);
                 const onTrappedBelow = onTrappedEntity !== null;
+                const dx = p.x - e.x;
+                const dy = p.y - e.y;
+                const speed = 0.06 * this.speedMultiplier;
+                const canLeft = ex > 0 && !this.isSolidOrBrick(ex - 1, ey);
+                const canRight = ex < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(ex + 1, ey);
+                const canUp = ey > 0 && !this.isSolidOrBrick(ex, ey - 1) && (onLadder || this.isLadder(ex, ey - 1));
+                const canDown = ey < LEVEL_HEIGHT - 1 && !this.isSolidOrBrick(ex, ey + 1) && (onLadder || belowIsLadder);
 
                 e.vx = 0;
                 e.vy = 0;
@@ -5840,17 +5911,6 @@
                 if (!onGround && !onLadder && !onBar && !onTrappedBelow) {
                     e.vy = 0.2 * this.speedMultiplier;
                 } else {
-                    // Chase player
-                    const dx = p.x - e.x;
-                    const dy = p.y - e.y;
-                    const speed = 0.06 * this.speedMultiplier;
-
-                    // Movement checks - enemies can walk ON BRICK but not THROUGH BRICK
-                    const canLeft = ex > 0 && !this.isSolidOrBrick(ex - 1, ey);
-                    const canRight = ex < LEVEL_WIDTH - 1 && !this.isSolidOrBrick(ex + 1, ey);
-                    const canUp = ey > 0 && !this.isSolidOrBrick(ex, ey - 1) && (onLadder || this.isLadder(ex, ey - 1));
-                    const canDown = ey < LEVEL_HEIGHT - 1 && !this.isSolidOrBrick(ex, ey + 1) && (onLadder || belowIsLadder);
-
                     // Simple AI: prioritize direction toward player
                     if (onLadder || onTrappedBelow) {
                         // On ladder or trapped entity - prefer vertical movement
@@ -5954,6 +6014,18 @@
                             }
                         }
                     }
+
+                    // Enemy with gold prioritizes escaping to the top (Apple II behavior)
+                    if (e.hasGold && ey < 5) {
+                        // Move toward left side of the map to escape (common pattern)
+                        if (canLeft && ex > 3) {
+                            e.vx = -speed;
+                            e.dir = -1;
+                        } else if (canRight && ex < LEVEL_WIDTH - 4) {
+                            e.vx = speed;
+                            e.dir = 1;
+                        }
+                    }
                 }
 
                 // Apply movement
@@ -5974,11 +6046,16 @@
                     e.y = Math.floor(onTrappedEntity.y) - 1;
                 }
 
+                const movedEx = Math.floor(e.x + 0.5);
+                const movedEy = Math.floor(e.y + 0.5);
+                const postDx = p.x - e.x;
+                const postDy = p.y - e.y;
+
                 // Gold pickup with cooldown (Apple II original: 5% chance per frame when passing through)
-                if (!e.hasGold && this.getTile(ex, ey) === TILE.GOLD) {
+                if (!e.hasGold && this.getTile(movedEx, movedEy) === TILE.GOLD) {
                     if (e.goldPickupCooldown <= 0 && Math.random() < GOLD_PICKUP_CHANCE) {
                         e.hasGold = true;
-                        this.setTile(ex, ey, TILE.EMPTY);
+                        this.setTile(movedEx, movedEy, TILE.EMPTY);
                         e.goldPickupCooldown = GOLD_PICKUP_COOLDOWN;
                         this.sound.play('pickup');
                     }
@@ -5991,33 +6068,21 @@
                 // Smart drop: enemy tries to drop gold in a safe place when being chased
                 if (e.hasGold && Math.random() < GOLD_DROP_CHANCE) {
                     // Check if player is close and below - drop to create trap
-                    const distToPlayer = Math.sqrt(dx * dx + dy * dy);
-                    if (distToPlayer < 3 && dy > 0) {
+                    const distToPlayer = Math.sqrt(postDx * postDx + postDy * postDy);
+                    if (distToPlayer < 3 && postDy > 0) {
                         // Drop gold to potentially trap player
-                        if (this.getTile(ex, ey) === TILE.EMPTY) {
+                        if (this.getTile(movedEx, movedEy) === TILE.EMPTY) {
                             e.hasGold = false;
-                            this.setTile(ex, ey, TILE.GOLD);
+                            this.setTile(movedEx, movedEy, TILE.GOLD);
                             this.sound.play('drop');
                         }
                     } else if (Math.random() < 0.3) {
                         // Random drop
-                        if (this.getTile(ex, ey) === TILE.EMPTY) {
+                        if (this.getTile(movedEx, movedEy) === TILE.EMPTY) {
                             e.hasGold = false;
-                            this.setTile(ex, ey, TILE.GOLD);
+                            this.setTile(movedEx, movedEy, TILE.GOLD);
                             this.sound.play('drop');
                         }
-                    }
-                }
-
-                // Enemy with gold prioritizes escaping to the top (Apple II behavior)
-                if (e.hasGold && (onGround || onTrappedBelow) && ey < 5) {
-                    // Move toward left side of the map to escape (common pattern)
-                    if (canLeft && ex > 3) {
-                        e.vx = -speed;
-                        e.dir = -1;
-                    } else if (canRight && ex < LEVEL_WIDTH - 4) {
-                        e.vx = speed;
-                        e.dir = 1;
                     }
                 }
 
@@ -6177,7 +6242,7 @@
                 this.speedMultiplier = Math.min(this.speedMultiplier + 0.15, 2.0); // Max 2x speed
                 this.currentLevel = 1;
                 this.score = 0;
-this.lives = 99;
+                this.lives = 99;
                 this.showMessage('SPEED UP! ' + Math.round(this.speedMultiplier * 100) + '%');
             } else {
                 this.currentLevel++;
@@ -6203,15 +6268,59 @@ this.lives = 99;
                 this.updateHoles();
                 this.updateDigEffects();
                 this.checkCollisions();
+                this.checkStuck();
+                if (this.frameCount % 30 === 0) {
+                    this.validateRuntimeState();
+                }
             } catch (e) {
-                console.error('Update error:', e);
+                this.handleRuntimeError('update', e);
+                if (this.failFast) throw e;
             }
         }
 
-        // checkStuck disabled - was causing game freeze
-        // Original Lode Runner doesn't have stuck detection
         checkStuck() {
-            return;
+            if (this.gameState !== STATE.PLAYING || !this.player) return;
+            if (this.demoMode) return;
+
+            // Grace period after level load/respawn to avoid false positives
+            if (this.levelStartGrace > 0) {
+                this.levelStartGrace--;
+                return;
+            }
+
+            // Skip while trapped/death transition is still resolving
+            if (this.player.trapped > 0 || this.gameState === STATE.DYING) return;
+
+            // Run heavy path check at low frequency for stability
+            this.stuckCheckTimer++;
+            if (this.stuckCheckTimer < 30) return;
+            this.stuckCheckTimer = 0;
+
+            const startX = Math.floor(this.player.x + 0.5);
+            const startY = Math.floor(this.player.y + 0.5);
+            const reachable = this.findReachablePositions(startX, startY);
+            let impossibleReason = '';
+
+            if (!reachable || reachable.size === 0) {
+                impossibleReason = 'NO REACHABLE MOVES';
+            }
+
+            if (!impossibleReason) {
+                this.impossibleReasonPending = '';
+                this.impossibleConfirmCount = 0;
+                return;
+            }
+
+            if (this.impossibleReasonPending === impossibleReason) {
+                this.impossibleConfirmCount++;
+            } else {
+                this.impossibleReasonPending = impossibleReason;
+                this.impossibleConfirmCount = 1;
+            }
+
+            if (this.impossibleConfirmCount >= this.impossibleConfirmThreshold) {
+                this.triggerStuck(impossibleReason);
+            }
         }
 
         findReachablePositions(startX, startY) {
@@ -6250,11 +6359,6 @@ this.lives = 99;
             return false;
         }
 
-        // For stuck detection: check if solid OR will become solid (dug hole)
-        isSolidOrWillBe(x, y) {
-            return this.isSolid(x, y) || this.isDugHole(x, y);
-        }
-
         getPossibleMoves(x, y) {
             const moves = [];
 
@@ -6262,11 +6366,11 @@ this.lives = 99;
             const belowTile = this.getTile(x, y + 1);
             const onLadder = currentTile === TILE.LADDER || currentTile === TILE.ESCAPE_LADDER;
             const onBar = currentTile === TILE.BAR;
-            // Consider dug holes as ground (they will fill back up)
-            const onGround = this.isSolidOrWillBe(x, y + 1) ||
-                            belowTile === TILE.LADDER ||
-                            currentTile === TILE.LADDER ||
-                            currentTile === TILE.ESCAPE_LADDER;
+            const onFalseFloor = this.isFalseFloor(x, y + 1);
+            // Match player movement constraints used in updatePlayer().
+            const onGround = (this.isSolidForPlayer(x, y + 1) || belowTile === TILE.LADDER || belowTile === TILE.ESCAPE_LADDER || onLadder) &&
+                            !onFalseFloor &&
+                            !this.isDugHole(x, y + 1);
 
             // Check for trapped enemy below (can stand on)
             let onTrappedEnemy = false;
@@ -6280,41 +6384,42 @@ this.lives = 99;
             const canMove = onGround || onLadder || onBar || onTrappedEnemy;
 
             // Move left
-            if (canMove && !this.isSolid(x - 1, y) && x > 0) {
+            if (canMove && !this.isSolidForPlayer(x - 1, y) && x > 0) {
                 moves.push({ x: x - 1, y });
             }
 
             // Move right
-            if (canMove && !this.isSolid(x + 1, y) && x < LEVEL_WIDTH - 1) {
+            if (canMove && !this.isSolidForPlayer(x + 1, y) && x < LEVEL_WIDTH - 1) {
                 moves.push({ x: x + 1, y });
             }
 
             // Move up (ladder only)
-            if ((onLadder || this.isLadder(x, y - 1)) && !this.isSolid(x, y - 1) && y > 0) {
+            if ((onLadder || this.isLadder(x, y - 1)) && !this.isSolidForPlayer(x, y - 1) && y > 0) {
                 moves.push({ x, y: y - 1 });
             }
 
-            // Move down (ladder or falling) - but don't intentionally fall into dug holes
-            if (y < LEVEL_HEIGHT - 1 && !this.isSolid(x, y + 1)) {
-                // For stuck detection: avoid falling into dug holes (player wouldn't do this)
-                // But allow if there's a ladder or bar below
-                const belowIsHole = this.isDugHole(x, y + 1);
-                const belowHasLadder = this.isLadder(x, y + 1);
-                const belowHasBar = this.isBar(x, y + 1);
-                if (!belowIsHole || belowHasLadder || belowHasBar) {
-                    moves.push({ x, y: y + 1 });
-                }
+            // Move down intentionally (ladder or bar drop)
+            if (y < LEVEL_HEIGHT - 1 &&
+                !this.isSolidForPlayer(x, y + 1) &&
+                (onLadder || this.isLadder(x, y + 1) || onBar)) {
+                moves.push({ x, y: y + 1 });
+            }
+
+            // Fall
+            if (y < LEVEL_HEIGHT - 1 &&
+                !this.isSolidForPlayer(x, y + 1) &&
+                !onGround && !onLadder && !onBar && !onTrappedEnemy) {
+                moves.push({ x, y: y + 1 });
             }
 
             // Dig left (creates path through brick below-left)
             // Only add if player can escape from the dug position
-            if (canMove && x > 0 && !this.isSolid(x - 1, y)) {
-                const digTarget = this.getTile(x - 1, y + 1);
-                if (digTarget === TILE.BRICK || digTarget === TILE.TRAP) {
+            if (canMove && x > 0 && !this.isSolidForPlayer(x - 1, y)) {
+                if (this.canDigTile(x - 1, y + 1)) {
                     // Check if player can escape from the dug hole
                     // Player can escape if there's an opening to the side
-                    const canEscapeLeft = x > 1 && !this.isSolid(x - 2, y + 1);
-                    const canEscapeRight = !this.isSolid(x, y + 1) || this.isSolid(x, y + 2);
+                    const canEscapeLeft = x > 1 && !this.isSolidForPlayer(x - 2, y + 1);
+                    const canEscapeRight = !this.isSolidForPlayer(x, y + 1) || this.isSolidForPlayer(x, y + 2);
                     // Also reachable if there's a ladder or bar in the dug position
                     const hasLadderOrBar = this.isLadder(x - 1, y + 1) || this.isBar(x - 1, y + 1);
 
@@ -6328,12 +6433,11 @@ this.lives = 99;
 
             // Dig right (creates path through brick below-right)
             // Only add if player can escape from the dug position
-            if (canMove && x < LEVEL_WIDTH - 1 && !this.isSolid(x + 1, y)) {
-                const digTarget = this.getTile(x + 1, y + 1);
-                if (digTarget === TILE.BRICK || digTarget === TILE.TRAP) {
+            if (canMove && x < LEVEL_WIDTH - 1 && !this.isSolidForPlayer(x + 1, y)) {
+                if (this.canDigTile(x + 1, y + 1)) {
                     // Check if player can escape from the dug hole
-                    const canEscapeRight = x < LEVEL_WIDTH - 2 && !this.isSolid(x + 2, y + 1);
-                    const canEscapeLeft = !this.isSolid(x, y + 1) || this.isSolid(x, y + 2);
+                    const canEscapeRight = x < LEVEL_WIDTH - 2 && !this.isSolidForPlayer(x + 2, y + 1);
+                    const canEscapeLeft = !this.isSolidForPlayer(x, y + 1) || this.isSolidForPlayer(x, y + 2);
                     const hasLadderOrBar = this.isLadder(x + 1, y + 1) || this.isBar(x + 1, y + 1);
 
                     if (canEscapeRight || canEscapeLeft || hasLadderOrBar) {
@@ -6343,7 +6447,7 @@ this.lives = 99;
             }
 
             // Special case: if on bar, can drop off
-            if (onBar && !this.isSolid(x, y + 1)) {
+            if (onBar && !this.isSolidForPlayer(x, y + 1)) {
                 // Don't drop into dug holes (same check as regular down movement)
                 const belowIsHole = this.isDugHole(x, y + 1);
                 if (!belowIsHole) {
@@ -6375,7 +6479,13 @@ this.lives = 99;
         showDeathOverlay(title, reason) {
             if (this.deathOverlay) {
                 this.deathTitle.textContent = title;
-                this.deathReason.innerHTML = reason + '<br><br>You will lose 1 life.';
+                const safeReason = String(reason)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+                this.deathReason.innerHTML = safeReason + '<br><br>You will lose 1 life.';
                 this.deathOverlay.classList.add('visible');
             }
         }
@@ -6392,7 +6502,7 @@ this.lives = 99;
 
         render() {
             const ctx = this.ctx;
-            const T = TILE_SIZE;
+            const s = (v) => v * SCALE;
 
             // Render editor mode
             if (this.gameState === STATE.EDITOR) {
@@ -6736,7 +6846,7 @@ this.lives = 99;
             // Controls info
             ctx.fillStyle = COLORS.CYAN;
             ctx.fillText('CONTROLS: ARROWS/WASD - MOVE | Z/X - DIG', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
-            ctx.fillText('ENTER - START/PAUSE | ESC - PAUSE | R - RESTART', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.93);
+            ctx.fillText('ENTER - START/PAUSE | ESC - PAUSE | R - RESTART | CTRL+A - ABORT', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.93);
 
             ctx.textAlign = 'left';
         }
@@ -6781,12 +6891,6 @@ this.lives = 99;
                     ctx.strokeStyle = COLORS.LIGHT_BLUE;
                     ctx.lineWidth = s(1);
                     ctx.strokeRect(px + s(1), py + s(1), T - s(2), T - s(2));
-                    break;
-                    // Border
-                    this.drawRoundRect(px, py, T, T, s(2));
-                    ctx.strokeStyle = '#303030';
-                    ctx.lineWidth = s(1);
-                    ctx.stroke();
                     break;
 
                 case TILE.LADDER:
@@ -6833,21 +6937,6 @@ this.lives = 99;
                     ctx.strokeStyle = COLORS.DARK_GRAY;
                     ctx.lineWidth = s(1);
                     ctx.strokeRect(px + s(1), py + s(1), T - s(2), T - s(2));
-                    break;
-                    ctx.moveTo(px + s(3), barY + s(3));
-                    ctx.lineTo(px + T - s(3), barY + s(3));
-                    ctx.stroke();
-
-                    // Rivets
-                    for (let i = 0; i < 4; i++) {
-                        const rx = px + T * 0.1 + i * T * 0.27;
-                        this.drawCircle(rx, barY + barH/2, s(3));
-                        ctx.fillStyle = '#808080';
-                        ctx.fill();
-                        ctx.strokeStyle = '#404040';
-                        ctx.lineWidth = s(1);
-                        ctx.stroke();
-                    }
                     break;
 
                 case TILE.GOLD:
@@ -7158,6 +7247,8 @@ this.lives = 99;
         }
 
         gameLoop() {
+            if (this.runtimeHalted) return;
+
             try {
                 const now = performance.now();
                 const delta = now - this.lastTime;
@@ -7213,6 +7304,7 @@ this.lives = 99;
                     }
 
                     this.update();
+                    if (this.runtimeHalted) return;
                     this.render();
                     // Keep frameCount incrementing for animations even when not playing
                     if (this.gameState !== STATE.PLAYING) {
@@ -7221,10 +7313,13 @@ this.lives = 99;
                     this.lastTime = now - (delta % this.tickRate);
                 }
             } catch (e) {
-                console.error('Game loop error:', e);
+                this.handleRuntimeError('gameLoop', e);
+                if (this.failFast) throw e;
             }
 
-            requestAnimationFrame(() => this.gameLoop());
+            if (!this.runtimeHalted) {
+                requestAnimationFrame(() => this.gameLoop());
+            }
         }
     }
 
