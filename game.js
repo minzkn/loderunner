@@ -120,6 +120,8 @@
     };
 
     const RULE_PROFILE_ORDER = ['apple2_strict', 'c64_strict', 'modern'];
+    const LOCK_RULE_PROFILE = true;
+    const LOCKED_RULE_PROFILE_ID = 'apple2_strict';
 
     // Game states
     const STATE = {
@@ -3958,6 +3960,9 @@
             this.enabled = true;
             this.iconEl = null;
             this.toggleEl = null;
+            this.profileId = 'apple2_strict';
+            this.strictMode = true;
+            this.lastPlayAt = {};
         }
 
         init() {
@@ -3993,6 +3998,34 @@
             if (this.toggleEl) {
                 this.toggleEl.classList.toggle('muted', !this.enabled);
             }
+        }
+
+        setProfile(profileId) {
+            this.profileId = profileId || 'apple2_strict';
+            this.strictMode = this.profileId !== 'modern';
+        }
+
+        canPlay(type) {
+            const now = performance.now();
+            const strictCooldown = {
+                step: 55,
+                climb: 70,
+                bar: 55,
+                fall: 100,
+                dig: 70
+            };
+            const modernCooldown = {
+                step: 35,
+                climb: 45,
+                bar: 35
+            };
+            const table = this.strictMode ? strictCooldown : modernCooldown;
+            const cooldown = table[type] || 0;
+            if (cooldown <= 0) return true;
+            const last = this.lastPlayAt[type] || 0;
+            if (now - last < cooldown) return false;
+            this.lastPlayAt[type] = now;
+            return true;
         }
 
         beep(freq, duration, type = 'square', vol = 0.1) {
@@ -4059,6 +4092,102 @@
         }
 
         play(type) {
+            if (!this.audioCtx) return;
+            if (!this.canPlay(type)) return;
+
+            if (this.strictMode) {
+                this.playStrict(type);
+                return;
+            }
+            this.playModern(type);
+        }
+
+        playStrict(type) {
+            switch (type) {
+                case 'gold':
+                    this.beep(900, 0.05, 'square', 0.08);
+                    setTimeout(() => this.beep(1200, 0.07, 'square', 0.08), 40);
+                    break;
+                case 'dig':
+                    this.noise(0.03, 0.12);
+                    break;
+                case 'fill':
+                    this.beep(170, 0.06, 'square', 0.09);
+                    break;
+                case 'trap':
+                    this.sweep(280, 110, 0.16, 'square', 0.1);
+                    break;
+                case 'respawn':
+                    this.beep(220, 0.05, 'square', 0.07);
+                    setTimeout(() => this.beep(330, 0.06, 'square', 0.07), 50);
+                    break;
+                case 'fall':
+                    this.sweep(360, 140, 0.12, 'square', 0.08);
+                    break;
+                case 'step':
+                    this.beep(135 + Math.random() * 20, 0.02, 'square', 0.03);
+                    break;
+                case 'climb':
+                    this.beep(200 + Math.random() * 20, 0.025, 'square', 0.035);
+                    break;
+                case 'bar':
+                    this.beep(170 + Math.random() * 15, 0.02, 'square', 0.03);
+                    break;
+                case 'die':
+                    this.sweep(440, 70, 0.35, 'square', 0.12);
+                    break;
+                case 'escape':
+                    this.beep(440, 0.05, 'square', 0.08);
+                    setTimeout(() => this.beep(554, 0.05, 'square', 0.08), 45);
+                    setTimeout(() => this.beep(659, 0.08, 'square', 0.08), 90);
+                    break;
+                case 'levelup':
+                    this.beep(523, 0.07, 'square', 0.08);
+                    setTimeout(() => this.beep(659, 0.07, 'square', 0.08), 70);
+                    setTimeout(() => this.beep(784, 0.1, 'square', 0.09), 140);
+                    break;
+                case 'start':
+                    this.beep(220, 0.06, 'square', 0.08);
+                    setTimeout(() => this.beep(330, 0.06, 'square', 0.08), 70);
+                    break;
+                case 'pause':
+                    this.beep(300, 0.08, 'square', 0.06);
+                    break;
+                case 'resume':
+                    this.beep(380, 0.08, 'square', 0.06);
+                    break;
+                case 'gameover':
+                    this.beep(330, 0.08, 'square', 0.08);
+                    setTimeout(() => this.beep(220, 0.1, 'square', 0.08), 90);
+                    setTimeout(() => this.beep(110, 0.14, 'square', 0.08), 200);
+                    break;
+                case 'stuck':
+                    this.beep(220, 0.08, 'square', 0.08);
+                    break;
+                case 'title':
+                    this.beep(262, 0.1, 'square', 0.06);
+                    setTimeout(() => this.beep(330, 0.1, 'square', 0.06), 120);
+                    break;
+                case 'demo':
+                    this.beep(523, 0.08, 'square', 0.05);
+                    break;
+                case 'kill':
+                    this.sweep(260, 90, 0.14, 'square', 0.08);
+                    break;
+                case 'championship':
+                    this.beep(392, 0.08, 'square', 0.07);
+                    setTimeout(() => this.beep(523, 0.08, 'square', 0.07), 100);
+                    break;
+                case 'drop':
+                    this.beep(320, 0.05, 'square', 0.05);
+                    break;
+                case 'pickup':
+                    this.beep(420, 0.05, 'square', 0.05);
+                    break;
+            }
+        }
+
+        playModern(type) {
             if (!this.audioCtx) return;
 
             switch (type) {
@@ -4259,7 +4388,7 @@
             this.keySource = {};  // Track input source: 'keyboard' or 'touch'
             this.gameState = STATE.TITLE;
             this.score = 0;
-            this.ruleProfile = 'modern';
+            this.ruleProfile = LOCKED_RULE_PROFILE_ID;
             this.rules = RULE_PROFILES[this.ruleProfile];
             this.lives = this.rules.startLives;
             this.currentLevel = 1;
@@ -4333,6 +4462,7 @@
             this.setupInput();
             this.setupResponsiveCanvas();
             this.sound.setupToggle();
+            this.sound.setProfile(this.ruleProfile);
 
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) {
@@ -4535,21 +4665,26 @@
         }
 
         cycleRuleProfile() {
+            if (LOCK_RULE_PROFILE) return;
             const idx = RULE_PROFILE_ORDER.indexOf(this.ruleProfile);
             const next = RULE_PROFILE_ORDER[(idx + 1) % RULE_PROFILE_ORDER.length];
             this.applyRuleProfile(next);
         }
 
         applyRuleProfile(profileId) {
+            if (LOCK_RULE_PROFILE && profileId !== LOCKED_RULE_PROFILE_ID) return;
             const profile = RULE_PROFILES[profileId];
             if (!profile) return;
             this.ruleProfile = profileId;
             this.rules = profile;
+            this.sound.setProfile(this.ruleProfile);
             this.activeLevels = this.getActiveLevels();
             this.lives = profile.startLives;
             this.speedMultiplier = 1.0;
             this.keys = {};
             this.keySource = {};
+            this.diggingEffects = [];
+            this.digParticles = [];
             if (this.gameState === STATE.TITLE) {
                 this.loadLevel(1);
             }
@@ -4560,6 +4695,10 @@
         getActiveLevels() {
             const modeKey = this.gameMode === 'championship' ? 'championship' : 'classic';
             return this.rules.dynamicEscapeLadder ? this.baseLevels[modeKey] : this.strictLevels[modeKey];
+        }
+
+        isStrictProfile() {
+            return LOCK_RULE_PROFILE || this.ruleProfile !== 'modern';
         }
 
         buildStrictLevels(levels) {
@@ -4614,24 +4753,52 @@
             return strictLevels;
         }
 
-        getKeyAction(keyCode) {
+        getKeyAction(keyCode, code) {
             const preset = this.rules.inputPreset;
-            const base = {
+            const baseCode = {
+                Enter: 'ENTER',
+                Escape: 'ESC',
+                KeyR: 'RESTART'
+            };
+            const baseKeyCode = {
                 13: 'ENTER',
                 27: 'ESC',
                 82: 'RESTART'
             };
 
             if (preset === 'legacy' || preset === 'legacy_plus_abort') {
-                const legacy = {
+                const legacyCode = {
+                    ArrowLeft: 'LEFT', ArrowUp: 'UP', ArrowRight: 'RIGHT', ArrowDown: 'DOWN',
+                    KeyI: 'UP', KeyJ: 'LEFT', KeyK: 'DOWN', KeyL: 'RIGHT',
+                    KeyZ: 'DIGL', KeyX: 'DIGR',
+                    KeyU: 'DIGL', KeyO: 'DIGR',
+                    F1: 'DIGL', F2: 'DIGR'
+                };
+                if (legacyCode[code]) return legacyCode[code];
+                if (baseCode[code]) return baseCode[code];
+
+                const legacyKeyCode = {
+                    37: 'LEFT', 38: 'UP', 39: 'RIGHT', 40: 'DOWN',
                     73: 'UP', 74: 'LEFT', 75: 'DOWN', 76: 'RIGHT',
+                    90: 'DIGL', 88: 'DIGR',
                     85: 'DIGL', 79: 'DIGR',
                     112: 'DIGL', 113: 'DIGR'
                 };
-                return legacy[keyCode] || base[keyCode] || null;
+                return legacyKeyCode[keyCode] || baseKeyCode[keyCode] || null;
             }
 
-            const modern = {
+            const modernCode = {
+                ArrowLeft: 'LEFT', ArrowUp: 'UP', ArrowRight: 'RIGHT', ArrowDown: 'DOWN',
+                KeyA: 'LEFT', KeyW: 'UP', KeyD: 'RIGHT', KeyS: 'DOWN',
+                KeyI: 'UP', KeyJ: 'LEFT', KeyK: 'DOWN', KeyL: 'RIGHT',
+                KeyZ: 'DIGL', KeyX: 'DIGR',
+                KeyU: 'DIGL', KeyO: 'DIGR',
+                F1: 'DIGL', F2: 'DIGR'
+            };
+            if (modernCode[code]) return modernCode[code];
+            if (baseCode[code]) return baseCode[code];
+
+            const modernKeyCode = {
                 37: 'LEFT', 38: 'UP', 39: 'RIGHT', 40: 'DOWN',
                 65: 'LEFT', 87: 'UP', 68: 'RIGHT', 83: 'DOWN',
                 73: 'UP', 74: 'LEFT', 75: 'DOWN', 76: 'RIGHT',
@@ -4639,7 +4806,7 @@
                 85: 'DIGL', 79: 'DIGR',
                 112: 'DIGL', 113: 'DIGR'
             };
-            return modern[keyCode] || base[keyCode] || null;
+            return modernKeyCode[keyCode] || baseKeyCode[keyCode] || null;
         }
 
         setupInput() {
@@ -4664,14 +4831,14 @@
                 }
 
                 // Original C64 behavior: Ctrl+A aborts current attempt (lose one life)
-                if (isDown && this.rules.allowAbortKey && e.ctrlKey && e.keyCode === 65) {
+                if (isDown && this.rules.allowAbortKey && e.ctrlKey && (e.code === 'KeyA' || e.keyCode === 65)) {
                     this.sound.init();
                     this.handleRestartKey();
                     e.preventDefault();
                     return;
                 }
 
-                const key = this.getKeyAction(e.keyCode);
+                const key = this.getKeyAction(e.keyCode, e.code);
                 if (key) {
                     // Prioritize newer input source
                     if (isDown) {
@@ -4688,19 +4855,24 @@
                 }
 
                 // 'C' key to toggle game mode (title screen only)
-                if (isDown && e.keyCode === 67 && this.gameState === STATE.TITLE) {
+                if (isDown && (e.code === 'KeyC' || e.keyCode === 67) && this.gameState === STATE.TITLE) {
                     this.toggleGameMode();
                     e.preventDefault();
                 }
 
                 // 'V' key to cycle RULES profile (title screen only)
-                if (isDown && e.keyCode === 86 && this.gameState === STATE.TITLE) {
+                if (isDown && (e.code === 'KeyV' || e.keyCode === 86) && this.gameState === STATE.TITLE) {
+                    if (LOCK_RULE_PROFILE) {
+                        this.showMessage('PROFILE LOCKED: APPLE2 STRICT');
+                        e.preventDefault();
+                        return;
+                    }
                     this.cycleRuleProfile();
                     e.preventDefault();
                 }
 
                 // 'E' key to toggle editor mode
-                if (isDown && e.keyCode === 69) {
+                if (isDown && (e.code === 'KeyE' || e.keyCode === 69)) {
                     this.toggleEditor();
                     e.preventDefault();
                 }
@@ -4712,14 +4884,18 @@
                 }
 
                 // 'M' key to toggle sound
-                if (isDown && e.keyCode === 77) {
+                if (isDown && (e.code === 'KeyM' || e.keyCode === 77)) {
                     this.sound.toggle();
                     e.preventDefault();
                 }
 
                 // Shift+N: Next level, Shift+P: Previous level
-                if (isDown && (e.keyCode === 78 || e.keyCode === 80) && e.shiftKey) {
-                    if (e.keyCode === 78) {
+                if (isDown && (e.code === 'KeyN' || e.code === 'KeyP' || e.keyCode === 78 || e.keyCode === 80) && e.shiftKey) {
+                    if (this.isStrictProfile()) {
+                        e.preventDefault();
+                        return;
+                    }
+                    if (e.code === 'KeyN' || e.keyCode === 78) {
                         this.currentLevel++;
                     } else {
                         this.currentLevel = Math.max(1, this.currentLevel - 1);
@@ -4914,6 +5090,10 @@
         updateTitleMessage() {
             const modeText = this.gameMode === 'championship' ? 'CHAMPIONSHIP' : 'CLASSIC';
             const levelCount = this.activeLevels.length;
+            if (LOCK_RULE_PROFILE) {
+                this.showMessage(`LODE RUNNER ${modeText} (${levelCount}) [APPLE2 STRICT] - ENTER | C:MODE`);
+                return;
+            }
             if (this.ruleProfile === 'modern') {
                 this.showMessage(`LODE RUNNER ${modeText} (${levelCount}) [MODERN] - ENTER | C:MODE | V:PROFILE | E:EDITOR`);
             } else {
@@ -5603,27 +5783,28 @@
                 this.dugHoles.push({ x: digX, y: digY, timer: HOLE_FILL_TIME }); // 300 frames at 30fps (10 seconds - original Apple II)
                 this.sound.play('dig');
 
-                // Add digging animation effect (pickaxe swing)
-                const digDir = digX > this.player.x ? 1 : -1;
-                this.diggingEffects.push({
-                    x: digX,
-                    y: digY,
-                    dir: digDir,
-                    frame: 0,
-                    maxFrames: 12
-                });
-
-                // Add debris particles (C64 style - red brick colors)
-                for (let i = 0; i < 6; i++) {
-                    this.digParticles.push({
-                        x: (digX + 0.5) * TILE_SIZE,
-                        y: (digY + 0.3) * TILE_SIZE,
-                        vx: (Math.random() - 0.5) * 3 * SCALE + digDir * 1.5 * SCALE,
-                        vy: -Math.random() * 3 * SCALE - 1 * SCALE,
-                        size: (Math.random() * 2 + 1.5) * SCALE,
-                        life: 15 + Math.floor(Math.random() * 8),
-                        color: Math.random() > 0.5 ? COLORS.RED : COLORS.BROWN
+                if (!this.isStrictProfile()) {
+                    // Modern profile only: decorative digging effect.
+                    const digDir = digX > this.player.x ? 1 : -1;
+                    this.diggingEffects.push({
+                        x: digX,
+                        y: digY,
+                        dir: digDir,
+                        frame: 0,
+                        maxFrames: 12
                     });
+
+                    for (let i = 0; i < 6; i++) {
+                        this.digParticles.push({
+                            x: (digX + 0.5) * TILE_SIZE,
+                            y: (digY + 0.3) * TILE_SIZE,
+                            vx: (Math.random() - 0.5) * 3 * SCALE + digDir * 1.5 * SCALE,
+                            vy: -Math.random() * 3 * SCALE - 1 * SCALE,
+                            size: (Math.random() * 2 + 1.5) * SCALE,
+                            life: 15 + Math.floor(Math.random() * 8),
+                            color: Math.random() > 0.5 ? COLORS.RED : COLORS.BROWN
+                        });
+                    }
                 }
 
                 return true;
@@ -6828,25 +7009,28 @@
 
             this.drawProfileBadge();
 
-            // Draw digging effects (pickaxe swing)
-            for (const eff of this.diggingEffects) {
-                this.drawDiggingEffect(eff);
-            }
+            if (!this.isStrictProfile()) {
+                // Draw digging effects (pickaxe swing)
+                for (const eff of this.diggingEffects) {
+                    this.drawDiggingEffect(eff);
+                }
 
-            // Draw debris particles (C64 style - simple squares)
-            for (const p of this.digParticles) {
-                const alpha = p.life / 30;
-                ctx.fillStyle = p.color;
-                ctx.globalAlpha = alpha;
-                // Simple square particles (C64 style)
-                const size = p.size * 0.5;
-                ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
-                ctx.globalAlpha = 1;
+                // Draw debris particles (C64 style - simple squares)
+                for (const p of this.digParticles) {
+                    const alpha = p.life / 30;
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = alpha;
+                    // Simple square particles (C64 style)
+                    const size = p.size * 0.5;
+                    ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
+                    ctx.globalAlpha = 1;
+                }
             }
         }
 
         drawProfileBadge() {
             if (this.gameState === STATE.TITLE || this.gameState === STATE.EDITOR) return;
+            if (this.isStrictProfile()) return;
 
             const ctx = this.ctx;
             const s = (v) => v * SCALE;
@@ -7021,6 +7205,37 @@
 
             // C64 style title text
             ctx.textAlign = 'center';
+            const modeText = this.gameMode === 'championship' ? 'CHAMPIONSHIP' : 'CLASSIC';
+            const levelCount = this.activeLevels.length + ' LEVELS';
+
+            if (this.isStrictProfile()) {
+                const titleY = CANVAS_HEIGHT * 0.26;
+                ctx.font = `bold ${s(34)}px monospace`;
+                ctx.fillStyle = COLORS.WHITE;
+                ctx.fillText('LODE RUNNER', CANVAS_WIDTH / 2, titleY);
+
+                ctx.font = `${s(14)}px monospace`;
+                ctx.fillStyle = COLORS.YELLOW;
+                ctx.fillText(`APPLE II 1983 | ${modeText}`, CANVAS_WIDTH / 2, titleY + s(28));
+
+                ctx.font = `${s(12)}px monospace`;
+                ctx.fillStyle = COLORS.CYAN;
+                ctx.fillText(`${levelCount} | ${this.rules.label}`, CANVAS_WIDTH / 2, titleY + s(50));
+
+                const blink = Math.floor(this.frameCount / 30) % 2;
+                if (blink) {
+                    ctx.fillStyle = COLORS.GREEN;
+                    ctx.fillText('PRESS ENTER TO START', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.56);
+                }
+
+                ctx.font = `${s(10)}px monospace`;
+                ctx.fillStyle = COLORS.GRAY;
+                ctx.fillText('MOVE: I/J/K/L | DIG: U/O Z/X (F1/F2)', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.84);
+                ctx.fillText('ENTER START | ESC PAUSE | R RESTART | M SOUND | C MODE', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.9);
+                ctx.fillText('(C) 1983 BRODERBUND SOFTWARE', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.95);
+                ctx.textAlign = 'left';
+                return;
+            }
             
             // Main title - C64 style
             const titleY = CANVAS_HEIGHT * 0.25;
@@ -7043,13 +7258,11 @@
             // Subtitle
             ctx.font = `bold ${s(16)}px monospace`;
             ctx.fillStyle = COLORS.CYAN;
-            const modeText = this.gameMode === 'championship' ? 'CHAMPIONSHIP' : 'CLASSIC';
             ctx.fillText(`${modeText} ${this.rules.label}`, CANVAS_WIDTH / 2, titleY + s(35));
 
             // Level count
             ctx.font = `${s(12)}px monospace`;
             ctx.fillStyle = COLORS.LIGHT_GRAY;
-            const levelCount = this.activeLevels.length + ' LEVELS';
             ctx.fillText(levelCount, CANVAS_WIDTH / 2, titleY + s(60));
 
             // Profile behavior summary
@@ -7082,7 +7295,7 @@
             if (this.rules.inputPreset === 'modern') {
                 ctx.fillText('MOVE: ARROWS/WASD/IJKL | DIG: Z/X U/O F1/F2', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
             } else {
-                ctx.fillText('MOVE: I/J/K/L | DIG: U/O (F1/F2)', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
+                ctx.fillText('MOVE: I/J/K/L | DIG: U/O Z/X (F1/F2)', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
             }
             if (this.rules.enableEditor) {
                 ctx.fillText('ENTER START | ESC PAUSE | R RESTART | C MODE | V PROFILE | E EDITOR', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.93);
@@ -7173,12 +7386,16 @@
                     break;
 
                 case TILE.TRAP:
-                    // C64 style: dark trap door
-                    ctx.fillStyle = COLORS.BLACK;
-                    ctx.fillRect(px, py, T, T);
-                    ctx.strokeStyle = COLORS.DARK_GRAY;
-                    ctx.lineWidth = s(1);
-                    ctx.strokeRect(px + s(1), py + s(1), T - s(2), T - s(2));
+                    if (this.isStrictProfile()) {
+                        this.drawTrapStrict(px, py);
+                    } else {
+                        // C64 style: dark trap door
+                        ctx.fillStyle = COLORS.BLACK;
+                        ctx.fillRect(px, py, T, T);
+                        ctx.strokeStyle = COLORS.DARK_GRAY;
+                        ctx.lineWidth = s(1);
+                        ctx.strokeRect(px + s(1), py + s(1), T - s(2), T - s(2));
+                    }
                     break;
 
                 case TILE.GOLD:
@@ -7241,6 +7458,18 @@
             ctx.fillRect(px + gap, py + T * 0.68, T * 0.45, brickH);
             ctx.fillStyle = COLORS.RED;
             ctx.fillRect(px + T * 0.52, py + T * 0.68, T * 0.43, brickH);
+        }
+
+        drawTrapStrict(px, py) {
+            const ctx = this.ctx;
+            const T = TILE_SIZE;
+            const s = (v) => v * SCALE;
+
+            // Apple II strict: false floor should visually blend into brick.
+            this.drawBrick(px, py);
+            ctx.strokeStyle = COLORS.DARK_GRAY;
+            ctx.lineWidth = s(1);
+            ctx.strokeRect(px + s(2), py + s(2), T - s(4), T - s(4));
         }
 
         drawBrickPartial(x, y, fillAmt) {
