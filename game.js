@@ -76,6 +76,51 @@
     const PLAYER_SPEED = 0.14;
     const ROPE_SPEED_MULTIPLIER = 1.15; // Rope movement is ~15% faster (speedrun exploit)
 
+    // Rule profiles from RULES.md section 17
+    const RULE_PROFILES = {
+        apple2_strict: {
+            id: 'apple2_strict',
+            label: 'APPLE2 STRICT',
+            startLives: 5,
+            allowTrapDig: false,
+            allowAbortKey: false,
+            enableDemo: false,
+            enableEditor: false,
+            enableAutoStuck: false,
+            dynamicEscapeLadder: false,
+            classicSpeedLoop: false,
+            inputPreset: 'legacy'
+        },
+        c64_strict: {
+            id: 'c64_strict',
+            label: 'C64 STRICT',
+            startLives: 5,
+            allowTrapDig: false,
+            allowAbortKey: true,
+            enableDemo: false,
+            enableEditor: false,
+            enableAutoStuck: false,
+            dynamicEscapeLadder: false,
+            classicSpeedLoop: false,
+            inputPreset: 'legacy_plus_abort'
+        },
+        modern: {
+            id: 'modern',
+            label: 'MODERN',
+            startLives: 99,
+            allowTrapDig: true,
+            allowAbortKey: true,
+            enableDemo: true,
+            enableEditor: true,
+            enableAutoStuck: true,
+            dynamicEscapeLadder: true,
+            classicSpeedLoop: true,
+            inputPreset: 'modern'
+        }
+    };
+
+    const RULE_PROFILE_ORDER = ['apple2_strict', 'c64_strict', 'modern'];
+
     // Game states
     const STATE = {
         TITLE: 0,
@@ -4214,7 +4259,9 @@
             this.keySource = {};  // Track input source: 'keyboard' or 'touch'
             this.gameState = STATE.TITLE;
             this.score = 0;
-            this.lives = 99;
+            this.ruleProfile = 'modern';
+            this.rules = RULE_PROFILES[this.ruleProfile];
+            this.lives = this.rules.startLives;
             this.currentLevel = 1;
             this.speedMultiplier = 1.0;  // C64: increases after completing all 150 levels
 
@@ -4247,7 +4294,15 @@
 
             // Game mode (classic or championship)
             this.gameMode = 'classic';  // 'classic' or 'championship'
-            this.activeLevels = LEVELS;
+            this.baseLevels = {
+                classic: LEVELS,
+                championship: CHAMPIONSHIP_LEVELS
+            };
+            this.strictLevels = {
+                classic: this.buildStrictLevels(LEVELS),
+                championship: this.buildStrictLevels(CHAMPIONSHIP_LEVELS)
+            };
+            this.activeLevels = this.getActiveLevels();
 
             // Editor mode
             this.editorTile = TILE.BRICK;
@@ -4479,17 +4534,115 @@
             return grad;
         }
 
-        setupInput() {
-            const keyCodeMap = {
+        cycleRuleProfile() {
+            const idx = RULE_PROFILE_ORDER.indexOf(this.ruleProfile);
+            const next = RULE_PROFILE_ORDER[(idx + 1) % RULE_PROFILE_ORDER.length];
+            this.applyRuleProfile(next);
+        }
+
+        applyRuleProfile(profileId) {
+            const profile = RULE_PROFILES[profileId];
+            if (!profile) return;
+            this.ruleProfile = profileId;
+            this.rules = profile;
+            this.activeLevels = this.getActiveLevels();
+            this.lives = profile.startLives;
+            this.speedMultiplier = 1.0;
+            this.keys = {};
+            this.keySource = {};
+            if (this.gameState === STATE.TITLE) {
+                this.loadLevel(1);
+            }
+            this.updateUI();
+            this.updateTitleMessage();
+        }
+
+        getActiveLevels() {
+            const modeKey = this.gameMode === 'championship' ? 'championship' : 'classic';
+            return this.rules.dynamicEscapeLadder ? this.baseLevels[modeKey] : this.strictLevels[modeKey];
+        }
+
+        buildStrictLevels(levels) {
+            const strictLevels = [];
+
+            for (const level of levels) {
+                const rows = [];
+                for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                    const src = level[y] || '';
+                    rows.push(src.padEnd(LEVEL_WIDTH, '.').slice(0, LEVEL_WIDTH).split(''));
+                }
+
+                const ladderColumns = [];
+                for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                    for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                        if (rows[y][x] === 'H') {
+                            ladderColumns.push({ x, y });
+                            break;
+                        }
+                    }
+                }
+
+                let seedColumns = ladderColumns;
+                if (seedColumns.length === 0) {
+                    const barColumns = [];
+                    for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                        for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                            if (rows[y][x] === '-') {
+                                barColumns.push({ x, y });
+                                break;
+                            }
+                        }
+                    }
+                    seedColumns = barColumns;
+                }
+
+                seedColumns.sort((a, b) => a.y - b.y);
+                const takeCount = Math.min(3, seedColumns.length);
+
+                for (let i = 0; i < takeCount; i++) {
+                    const col = seedColumns[i];
+                    for (let y = 0; y <= col.y; y++) {
+                        if (rows[y][col.x] === '.') {
+                            rows[y][col.x] = 'e';
+                        }
+                    }
+                }
+
+                strictLevels.push(rows.map((r) => r.join('')));
+            }
+
+            return strictLevels;
+        }
+
+        getKeyAction(keyCode) {
+            const preset = this.rules.inputPreset;
+            const base = {
+                13: 'ENTER',
+                27: 'ESC',
+                82: 'RESTART'
+            };
+
+            if (preset === 'legacy' || preset === 'legacy_plus_abort') {
+                const legacy = {
+                    73: 'UP', 74: 'LEFT', 75: 'DOWN', 76: 'RIGHT',
+                    85: 'DIGL', 79: 'DIGR',
+                    112: 'DIGL', 113: 'DIGR'
+                };
+                return legacy[keyCode] || base[keyCode] || null;
+            }
+
+            const modern = {
                 37: 'LEFT', 38: 'UP', 39: 'RIGHT', 40: 'DOWN',
                 65: 'LEFT', 87: 'UP', 68: 'RIGHT', 83: 'DOWN',
                 73: 'UP', 74: 'LEFT', 75: 'DOWN', 76: 'RIGHT',
                 90: 'DIGL', 88: 'DIGR',
                 85: 'DIGL', 79: 'DIGR',
-                112: 'DIGL', 113: 'DIGR',
-                13: 'ENTER', 82: 'RESTART', 27: 'ESC'
+                112: 'DIGL', 113: 'DIGR'
             };
+            return modern[keyCode] || base[keyCode] || null;
+        }
 
+        setupInput() {
             // Key display update function
             const updateKeyDisplay = (key, isActive) => {
                 const keyEl = document.querySelector(`#key-display .key-item[data-key="${key}"]`);
@@ -4511,14 +4664,14 @@
                 }
 
                 // Original C64 behavior: Ctrl+A aborts current attempt (lose one life)
-                if (isDown && e.ctrlKey && e.keyCode === 65) {
+                if (isDown && this.rules.allowAbortKey && e.ctrlKey && e.keyCode === 65) {
                     this.sound.init();
                     this.handleRestartKey();
                     e.preventDefault();
                     return;
                 }
 
-                const key = keyCodeMap[e.keyCode];
+                const key = this.getKeyAction(e.keyCode);
                 if (key) {
                     // Prioritize newer input source
                     if (isDown) {
@@ -4537,6 +4690,12 @@
                 // 'C' key to toggle game mode (title screen only)
                 if (isDown && e.keyCode === 67 && this.gameState === STATE.TITLE) {
                     this.toggleGameMode();
+                    e.preventDefault();
+                }
+
+                // 'V' key to cycle RULES profile (title screen only)
+                if (isDown && e.keyCode === 86 && this.gameState === STATE.TITLE) {
+                    this.cycleRuleProfile();
                     e.preventDefault();
                 }
 
@@ -4743,7 +4902,7 @@
             this.gameState = STATE.TITLE;
             this.demoMode = false;
             this.lastInputTime = this.frameCount;  // Reset input timer
-            this.activeLevels = this.gameMode === 'championship' ? CHAMPIONSHIP_LEVELS : LEVELS;
+            this.activeLevels = this.getActiveLevels();
             this.loadLevel(1);
             this.updateTitleMessage();
             // Play title music
@@ -4755,13 +4914,18 @@
         updateTitleMessage() {
             const modeText = this.gameMode === 'championship' ? 'CHAMPIONSHIP' : 'CLASSIC';
             const levelCount = this.activeLevels.length;
-            this.showMessage(`LODE RUNNER ${modeText} (${levelCount} LEVELS) - PRESS ENTER | C: MODE`);
+            if (this.ruleProfile === 'modern') {
+                this.showMessage(`LODE RUNNER ${modeText} (${levelCount}) [MODERN] - ENTER | C:MODE | V:PROFILE | E:EDITOR`);
+            } else {
+                this.showMessage(`LODE RUNNER ${modeText} (${levelCount}) [${this.rules.label}] - ENTER | C:MODE | V:PROFILE`);
+            }
         }
 
         startDemo() {
+            if (!this.rules.enableDemo) return;
             this.demoMode = true;
             this.score = 0;
-            this.lives = 99;
+            this.lives = this.rules.startLives;
             this.currentLevel = Math.floor(Math.random() * Math.min(10, this.activeLevels.length)) + 1;
             this.loadLevel(this.currentLevel);
             this.gameState = STATE.PLAYING;
@@ -5088,11 +5252,11 @@
         toggleGameMode() {
             if (this.gameMode === 'classic') {
                 this.gameMode = 'championship';
-                this.activeLevels = CHAMPIONSHIP_LEVELS;
+                this.activeLevels = this.getActiveLevels();
                 this.sound.play('championship');
             } else {
                 this.gameMode = 'classic';
-                this.activeLevels = LEVELS;
+                this.activeLevels = this.getActiveLevels();
                 this.sound.play('demo');
             }
             this.loadLevel(1);
@@ -5100,6 +5264,12 @@
         }
 
         toggleEditor() {
+            if (!this.rules.enableEditor) {
+                if (this.gameState === STATE.TITLE) {
+                    this.showMessage('EDITOR DISABLED IN ' + this.rules.label);
+                }
+                return;
+            }
             if (this.gameState === STATE.EDITOR) {
                 this.gameState = STATE.TITLE;
                 this.showMessage('');
@@ -5195,8 +5365,9 @@
             this.demoMode = false;
             this.lastInputTime = this.frameCount;  // 입력 타이머 리셋
             this.score = 0;
-            this.lives = 99;
+            this.lives = this.rules.startLives;
             this.currentLevel = 1;
+            this.speedMultiplier = 1.0;
             this.updateUI();
             this.loadLevel(this.currentLevel);
             this.gameState = STATE.PLAYING;
@@ -5239,6 +5410,7 @@
             this.dugHoles = [];
             this.diggingEffects = [];
             this.digParticles = [];
+            this.hiddenEscapeTiles = [];
             this.goldCount = 0;
             this.goldCollected = 0;
             this.escapeLadderActive = false;
@@ -5266,6 +5438,11 @@
                         case '$':
                             tile = TILE.GOLD;
                             this.goldCount++;
+                            break;
+                        case 'e':
+                            // Hidden escape ladder seed for strict profiles
+                            tile = TILE.EMPTY;
+                            this.hiddenEscapeTiles.push({ x, y });
                             break;
                         case 'P':
                             this.player = { x: x, y: y, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0, goldCount: 0, falseFloorTimer: 0 };
@@ -5333,7 +5510,7 @@
 
         isDiggableTile(x, y) {
             const t = this.getTile(x, y);
-            return t === TILE.BRICK || t === TILE.TRAP;
+            return t === TILE.BRICK || (this.rules.allowTrapDig && t === TILE.TRAP);
         }
 
         canDigTile(x, y) {
@@ -5498,55 +5675,71 @@
 
         activateEscape() {
             this.escapeLadderActive = true;
+            let generated = false;
 
-            // Find unique ladder columns and their highest positions
-            const ladderColumns = [];
-            for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
-                for (let y = 0; y < LEVEL_HEIGHT; y++) {
-                    if (this.isLadder(x, y)) {
-                        ladderColumns.push({ x: x, y: y });
-                        break; // Only need highest ladder in each column
+            // Strict profiles prefer static hidden ladders embedded in level data.
+            if (!this.rules.dynamicEscapeLadder && this.hiddenEscapeTiles && this.hiddenEscapeTiles.length > 0) {
+                for (const pos of this.hiddenEscapeTiles) {
+                    if (this.getTile(pos.x, pos.y) === TILE.EMPTY || this.getTile(pos.x, pos.y) === TILE.LADDER) {
+                        this.setTile(pos.x, pos.y, TILE.ESCAPE_LADDER);
+                        generated = true;
                     }
                 }
             }
 
-            // If there are ladders, sort by height (lowest y = highest on screen)
-            if (ladderColumns.length > 0) {
-                ladderColumns.sort((a, b) => a.y - b.y);
+            if (!generated) {
 
-                // Take only top 1-3 ladders (most accessible ones)
-                const numToTake = Math.min(3, ladderColumns.length);
-                for (let i = 0; i < numToTake; i++) {
-                    const col = ladderColumns[i];
-                    // Create escape ladder from top to this ladder
-                    for (let y = 0; y <= col.y; y++) {
-                        if (this.getTile(col.x, y) === TILE.EMPTY || this.getTile(col.x, y) === TILE.LADDER) {
-                            this.setTile(col.x, y, TILE.ESCAPE_LADDER);
-                        }
-                    }
-                }
-            }
-
-            // If no ladders, try bars
-            if (ladderColumns.length === 0) {
-                const barColumns = [];
+                // Find unique ladder columns and their highest positions
+                const ladderColumns = [];
                 for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
                     for (let y = 0; y < LEVEL_HEIGHT; y++) {
-                        if (this.getTile(x, y) === TILE.BAR) {
-                            barColumns.push({ x: x, y: y });
-                            break;
+                        if (this.isLadder(x, y)) {
+                            ladderColumns.push({ x: x, y: y });
+                            break; // Only need highest ladder in each column
                         }
                     }
                 }
 
-                if (barColumns.length > 0) {
-                    barColumns.sort((a, b) => a.y - b.y);
-                    const numToTake = Math.min(3, barColumns.length);
+                // If there are ladders, sort by height (lowest y = highest on screen)
+                if (ladderColumns.length > 0) {
+                    ladderColumns.sort((a, b) => a.y - b.y);
+
+                    // Take only top 1-3 ladders (most accessible ones)
+                    const numToTake = Math.min(3, ladderColumns.length);
                     for (let i = 0; i < numToTake; i++) {
-                        const col = barColumns[i];
+                        const col = ladderColumns[i];
+                        // Create escape ladder from top to this ladder
                         for (let y = 0; y <= col.y; y++) {
-                            if (this.getTile(col.x, y) === TILE.EMPTY) {
+                            if (this.getTile(col.x, y) === TILE.EMPTY || this.getTile(col.x, y) === TILE.LADDER) {
                                 this.setTile(col.x, y, TILE.ESCAPE_LADDER);
+                                generated = true;
+                            }
+                        }
+                    }
+                }
+
+                // If no ladders, try bars
+                if (ladderColumns.length === 0) {
+                    const barColumns = [];
+                    for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                        for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                            if (this.getTile(x, y) === TILE.BAR) {
+                                barColumns.push({ x: x, y: y });
+                                break;
+                            }
+                        }
+                    }
+
+                    if (barColumns.length > 0) {
+                        barColumns.sort((a, b) => a.y - b.y);
+                        const numToTake = Math.min(3, barColumns.length);
+                        for (let i = 0; i < numToTake; i++) {
+                            const col = barColumns[i];
+                            for (let y = 0; y <= col.y; y++) {
+                                if (this.getTile(col.x, y) === TILE.EMPTY) {
+                                    this.setTile(col.x, y, TILE.ESCAPE_LADDER);
+                                    generated = true;
+                                }
                             }
                         }
                     }
@@ -6238,11 +6431,11 @@
             this.gameState = STATE.LEVEL_COMPLETE;
             
             // C64: After completing all 150 levels, speed increases and game restarts
-            if (this.currentLevel >= 150 && this.gameMode === 'classic') {
+            if (this.rules.classicSpeedLoop && this.currentLevel >= 150 && this.gameMode === 'classic') {
                 this.speedMultiplier = Math.min(this.speedMultiplier + 0.15, 2.0); // Max 2x speed
                 this.currentLevel = 1;
                 this.score = 0;
-                this.lives = 99;
+                this.lives = this.rules.startLives;
                 this.showMessage('SPEED UP! ' + Math.round(this.speedMultiplier * 100) + '%');
             } else {
                 this.currentLevel++;
@@ -6281,6 +6474,7 @@
         checkStuck() {
             if (this.gameState !== STATE.PLAYING || !this.player) return;
             if (this.demoMode) return;
+            if (!this.rules.enableAutoStuck) return;
 
             // Grace period after level load/respawn to avoid false positives
             if (this.levelStartGrace > 0) {
@@ -6632,6 +6826,8 @@
                 ctx.textAlign = 'left';
             }
 
+            this.drawProfileBadge();
+
             // Draw digging effects (pickaxe swing)
             for (const eff of this.diggingEffects) {
                 this.drawDiggingEffect(eff);
@@ -6647,6 +6843,33 @@
                 ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
                 ctx.globalAlpha = 1;
             }
+        }
+
+        drawProfileBadge() {
+            if (this.gameState === STATE.TITLE || this.gameState === STATE.EDITOR) return;
+
+            const ctx = this.ctx;
+            const s = (v) => v * SCALE;
+            const modeLabel = this.gameMode === 'championship' ? 'CHAMP' : 'CLASSIC';
+            const text = `${this.rules.label} | ${modeLabel}`;
+
+            ctx.save();
+            ctx.font = `${s(10)}px monospace`;
+            const padX = s(6);
+            const padY = s(4);
+            const w = ctx.measureText(text).width + padX * 2;
+            const h = s(16);
+            const x = CANVAS_WIDTH - w - s(6);
+            const y = s(6);
+
+            ctx.fillStyle = 'rgba(0,0,0,0.65)';
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeStyle = this.ruleProfile === 'modern' ? COLORS.CYAN : COLORS.ORANGE;
+            ctx.lineWidth = s(1);
+            ctx.strokeRect(x, y, w, h);
+            ctx.fillStyle = COLORS.WHITE;
+            ctx.fillText(text, x + padX, y + h - padY);
+            ctx.restore();
         }
 
         drawDiggingEffect(eff) {
@@ -6821,13 +7044,24 @@
             ctx.font = `bold ${s(16)}px monospace`;
             ctx.fillStyle = COLORS.CYAN;
             const modeText = this.gameMode === 'championship' ? 'CHAMPIONSHIP' : 'CLASSIC';
-            ctx.fillText(`${modeText} EDITION`, CANVAS_WIDTH / 2, titleY + s(35));
+            ctx.fillText(`${modeText} ${this.rules.label}`, CANVAS_WIDTH / 2, titleY + s(35));
 
             // Level count
             ctx.font = `${s(12)}px monospace`;
             ctx.fillStyle = COLORS.LIGHT_GRAY;
-            const levelCount = this.gameMode === 'championship' ? '50 LEVELS' : '150 LEVELS';
-            ctx.fillText(`${levelCount}`, CANVAS_WIDTH / 2, titleY + s(60));
+            const levelCount = this.activeLevels.length + ' LEVELS';
+            ctx.fillText(levelCount, CANVAS_WIDTH / 2, titleY + s(60));
+
+            // Profile behavior summary
+            ctx.font = `${s(11)}px monospace`;
+            ctx.fillStyle = COLORS.ORANGE;
+            if (this.ruleProfile === 'modern') {
+                ctx.fillText('DYNAMIC ESCAPE | AUTO STUCK | DEMO/EDITOR ON', CANVAS_WIDTH / 2, titleY + s(82));
+            } else if (this.ruleProfile === 'c64_strict') {
+                ctx.fillText('STATIC ESCAPE | LIVES 5 | CTRL+A ABORT', CANVAS_WIDTH / 2, titleY + s(82));
+            } else {
+                ctx.fillText('STATIC ESCAPE | LIVES 5 | NO DEMO/EDITOR', CANVAS_WIDTH / 2, titleY + s(82));
+            }
 
             // Instructions
             ctx.font = `${s(14)}px monospace`;
@@ -6845,8 +7079,16 @@
 
             // Controls info
             ctx.fillStyle = COLORS.CYAN;
-            ctx.fillText('CONTROLS: ARROWS/WASD - MOVE | Z/X - DIG', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
-            ctx.fillText('ENTER - START/PAUSE | ESC - PAUSE | R - RESTART | CTRL+A - ABORT', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.93);
+            if (this.rules.inputPreset === 'modern') {
+                ctx.fillText('MOVE: ARROWS/WASD/IJKL | DIG: Z/X U/O F1/F2', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
+            } else {
+                ctx.fillText('MOVE: I/J/K/L | DIG: U/O (F1/F2)', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.88);
+            }
+            if (this.rules.enableEditor) {
+                ctx.fillText('ENTER START | ESC PAUSE | R RESTART | C MODE | V PROFILE | E EDITOR', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.93);
+            } else {
+                ctx.fillText('ENTER START | ESC PAUSE | R RESTART | C MODE | V PROFILE', CANVAS_WIDTH / 2, CANVAS_HEIGHT * 0.93);
+            }
 
             ctx.textAlign = 'left';
         }
@@ -7255,7 +7497,7 @@
 
                 if (delta >= this.tickRate) {
                     // Demo mode timer - 30초 무입력 시 데모 전환
-                    if (!this.demoMode) {
+                    if (this.rules.enableDemo && !this.demoMode) {
                         const idleTime = this.frameCount - this.lastInputTime;
                         if (idleTime >= this.idleTimeoutFrames) {
                             this.startDemo();

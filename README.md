@@ -35,6 +35,7 @@ python -m http.server 8080
 | 레벨 재시작 (목숨 1 소모) | R |
 | 사운드 토글 | M |
 | 게임 모드 전환 (타이틀) | C |
+| 규칙 프로파일 전환 (타이틀) | V |
 | 레벨 에디터 토글 | E |
 | 디버그 레벨 이동 | Shift+N / Shift+P |
 
@@ -64,9 +65,14 @@ python -m http.server 8080
 - 점프 불가
 - 낙하 데미지 없음
 - 플레이어 금 운반은 1개 제한
-- 파기 대상은 좌/우 대각선 아래 BRICK만 가능
+- 파기 대상은 프로파일별로 다름 (`modern`: BRICK/TRAP, strict: BRICK)
 - 적은 BRICK 위를 통과 가능, 플레이어는 불가
 - 함정(`T`)은 밟으면 떨어지는 False Floor
+
+규칙 프로파일:
+- `modern` (기본): 목숨 99, 자동 교착 감지, 데모/에디터 활성, 동적 탈출 사다리
+- `apple2_strict`: 목숨 5, 데모/에디터/자동 교착 비활성, 레거시 입력
+- `c64_strict`: 목숨 5, 레거시 입력 + `Ctrl+A` 중단
 
 ## 주요 상수 (현재 구현)
 
@@ -101,4 +107,5 @@ loderunner/
 ## 참고
 
 - 레벨 데이터는 `game.js` 내 문자열 배열로 포함됨
+- `RULES_CHECKLIST.md` 에 RULES 기반 수동 회귀 체크리스트 제공
 - 원작 Lode Runner 저작권은 권리자(Tozai Games 등)에 있음
