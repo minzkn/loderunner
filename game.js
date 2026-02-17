@@ -5952,7 +5952,7 @@
                 p.falseFloorTimer = 0;
             }
             
-            const onGround = (this.isSolidForPlayer(px, py + 1) || this.isLadder(px, py) || this.isLadder(px, py + 1)) 
+            const onGround = (this.isSolidForPlayer(px, py + 1) || this.isFalseFloor(px, py + 1) || this.isLadder(px, py) || this.isLadder(px, py + 1))
                 && !(onFalseFloor && p.falseFloorTimer > 1)
                 && !this.isDugHole(px, py + 1);
             
@@ -6473,16 +6473,14 @@
 
                 if (hole.timer <= 0) {
                     for (const e of this.enemies) {
-                        if (Math.floor(e.x + 0.5) === hole.x && Math.floor(e.y + 0.5) === hole.y) {
-                            this.score += 75;  // C64 original: enemy dies in hole 75 points
-                            this.updateUI();
+                        if (Math.floor(e.x) === hole.x && Math.floor(e.y) === hole.y) {
                             this.sound.play('kill');
                             this.respawnEnemy(e);
                         }
                     }
 
-                    const px = Math.floor(this.player.x + 0.5);
-                    const py = Math.floor(this.player.y + 0.5);
+                    const px = Math.floor(this.player.x);
+                    const py = Math.floor(this.player.y);
                     if (px === hole.x && py === hole.y) {
                         this.playerDie();
                     }
