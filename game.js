@@ -4436,6 +4436,9 @@
             // Editor mode
             this.editorTile = TILE.BRICK;
             this.editorLevel = this.createEmptyLevel();
+            this.editorPlayer = null;
+            this.editorEnemies = [];
+            this.editorCursor = null;
 
             // Demo mode
             this.demoMode = false;
@@ -4600,6 +4603,7 @@
                     if (tileX === 0 || tileX === LEVEL_WIDTH - 1 || tileY === 0 || tileY === LEVEL_HEIGHT - 1) {
                         return;
                     }
+                    this.editorCursor = { x: tileX, y: tileY };
                     this.editorLevel[tileY][tileX] = this.editorTile;
                 }
             });
@@ -4871,16 +4875,21 @@
                     e.preventDefault();
                 }
 
+                // Editor mode keyboard controls
+                if (this.gameState === STATE.EDITOR) {
+                    if (isDown && (e.code === 'Escape' || e.keyCode === 27)) {
+                        this.toggleEditor();
+                        e.preventDefault();
+                        return;
+                    }
+                    this.handleEditorInput(e, isDown);
+                    return;
+                }
+
                 // 'E' key to toggle editor mode
                 if (isDown && (e.code === 'KeyE' || e.keyCode === 69)) {
                     this.toggleEditor();
                     e.preventDefault();
-                }
-
-                // Editor mode keyboard controls
-                if (this.gameState === STATE.EDITOR) {
-                    this.handleEditorInput(e, isDown);
-                    return;
                 }
 
                 // 'M' key to toggle sound
@@ -5452,11 +5461,14 @@
             }
             if (this.gameState === STATE.EDITOR) {
                 this.gameState = STATE.TITLE;
-                this.showMessage('');
+                this.updateTitleMessage();
             } else {
                 this.gameState = STATE.EDITOR;
                 this.editorLevel = this.createEmptyLevel();
                 this.editorTile = TILE.BRICK;
+                this.editorPlayer = null;
+                this.editorEnemies = [];
+                this.editorCursor = null;
                 this.showMessage('EDITOR - Click to place | 1-8: Select tile | S: Save | L: Load | ESC: Exit');
             }
             this.updateUI();
@@ -5505,8 +5517,10 @@
         }
 
         placeEditorEntity(type) {
-            const px = Math.floor(this.player?.x || LEVEL_WIDTH / 2);
-            const py = Math.floor(this.player?.y || LEVEL_HEIGHT / 2);
+            const fallbackX = this.player ? Math.floor(this.player.x) : Math.floor(LEVEL_WIDTH / 2);
+            const fallbackY = this.player ? Math.floor(this.player.y) : Math.floor(LEVEL_HEIGHT / 2);
+            const px = this.editorCursor ? this.editorCursor.x : fallbackX;
+            const py = this.editorCursor ? this.editorCursor.y : fallbackY;
             
             if (type === 'player') {
                 this.editorPlayer = { x: px, y: py };
@@ -5532,8 +5546,8 @@
             if (saved) {
                 const data = JSON.parse(saved);
                 this.editorLevel = data.level;
-                this.editorPlayer = data.player;
-                this.editorEnemies = data.enemies;
+                this.editorPlayer = data.player || null;
+                this.editorEnemies = Array.isArray(data.enemies) ? data.enemies : [];
             }
         }
 
@@ -5834,23 +5848,63 @@
             }
         }
 
+        grantPlayerGold() {
+            this.score += 250;
+            this.goldCollected++;
+            if (this.player && this.player.goldCount === 0) {
+                this.player.goldCount = 1;
+            }
+            this.sound.play('gold');
+            this.updateUI();
+
+            if (this.goldCollected >= this.goldCount && !this.escapeLadderActive) {
+                this.activateEscape();
+            }
+        }
+
+        dropGoldAt(dropX, dropY, preferAbove = false) {
+            const currentIsClosingHole = this.isDugHole(dropX, dropY);
+            const tryCurrentFirst = !preferAbove && !currentIsClosingHole;
+
+            if (tryCurrentFirst && this.getTile(dropX, dropY) === TILE.EMPTY) {
+                this.setTile(dropX, dropY, TILE.GOLD);
+                return true;
+            }
+
+            if (dropY > 0 && this.getTile(dropX, dropY - 1) === TILE.EMPTY) {
+                this.setTile(dropX, dropY - 1, TILE.GOLD);
+                return true;
+            }
+
+            if (!tryCurrentFirst && !currentIsClosingHole && this.getTile(dropX, dropY) === TILE.EMPTY) {
+                this.setTile(dropX, dropY, TILE.GOLD);
+                return true;
+            }
+
+            return false;
+        }
+
+        dropPlayerGoldOnDeath() {
+            if (!this.player || this.player.goldCount <= 0) return false;
+
+            const dropX = Math.floor(this.player.x + 0.5);
+            const dropY = Math.floor(this.player.y + 0.5);
+            const dropped = this.dropGoldAt(dropX, dropY);
+
+            this.player.goldCount = 0;
+            if (dropped) {
+                this.goldCollected = Math.max(0, this.goldCollected - 1);
+            }
+
+            return dropped;
+        }
+
         collectGold(x, y) {
             const ix = Math.floor(x + 0.5);
             const iy = Math.floor(y + 0.5);
             if (this.getTile(ix, iy) === TILE.GOLD) {
                 this.setTile(ix, iy, TILE.EMPTY);
-                this.score += 250;  // Apple II original: gold pickup 250 points
-                this.goldCollected++;
-                // Original Apple II rule: can only carry 1 gold at a time
-                if (this.player.goldCount === 0) {
-                    this.player.goldCount = 1;
-                }
-                this.sound.play('gold');
-                this.updateUI();
-
-                if (this.goldCollected >= this.goldCount) {
-                    this.activateEscape();
-                }
+                this.grantPlayerGold();
             }
         }
 
@@ -6497,19 +6551,28 @@
             if (e.hasGold) {
                 const dropX = Math.floor(e.x + 0.5);
                 const dropY = Math.floor(e.y + 0.5);
-                // Try to drop at current position, or above if blocked
-                if (this.getTile(dropX, dropY) === TILE.EMPTY) {
-                    this.setTile(dropX, dropY, TILE.GOLD);
-                } else if (dropY > 0 && this.getTile(dropX, dropY - 1) === TILE.EMPTY) {
-                    this.setTile(dropX, dropY - 1, TILE.GOLD);
-                }
+                this.dropGoldAt(dropX, dropY, true);
                 e.hasGold = false;
             }
 
             const spots = [];
             for (let x = 0; x < LEVEL_WIDTH; x++) {
                 for (let y = 0; y < 3; y++) {
-                    if (!this.isSolid(x, y)) spots.push({ x, y });
+                    const occupiedByPlayer = this.player &&
+                        Math.floor(this.player.x + 0.5) === x &&
+                        Math.floor(this.player.y + 0.5) === y;
+                    const occupiedByEnemy = this.enemies.some((other) =>
+                        other !== e &&
+                        Math.floor(other.x + 0.5) === x &&
+                        Math.floor(other.y + 0.5) === y
+                    );
+
+                    if (!this.isSolidOrBrick(x, y) &&
+                        !this.isDugHole(x, y) &&
+                        !occupiedByPlayer &&
+                        !occupiedByEnemy) {
+                        spots.push({ x, y });
+                    }
                 }
             }
             if (spots.length > 0) {
@@ -6564,14 +6627,7 @@
                     // Check if enemy has gold - player can steal it!
                     if (e.hasGold) {
                         e.hasGold = false;
-                        // Original Apple II rule: can only carry 1 gold at a time
-                        if (this.player.goldCount === 0) {
-                            this.player.goldCount = 1;
-                        }
-                        this.goldCollected++;
-                        this.score += 250;
-                        this.sound.play('gold');
-                        this.updateUI();
+                        this.grantPlayerGold();
                         continue; // Don't die if stole gold
                     }
                     this.playerDie();
@@ -6585,17 +6641,7 @@
 
             // Original Apple II: Drop gold when player dies (can only carry 1 gold)
             if (this.player && this.player.goldCount > 0) {
-                const dropX = Math.floor(this.player.x + 0.5);
-                const dropY = Math.floor(this.player.y + 0.5);
-                
-                // Can only carry 1 gold, so just drop one
-                if (this.getTile(dropX, dropY) === TILE.EMPTY) {
-                    this.setTile(dropX, dropY, TILE.GOLD);
-                    this.player.goldCount = 0;
-                } else if (dropY > 0 && this.getTile(dropX, dropY - 1) === TILE.EMPTY) {
-                    this.setTile(dropX, dropY - 1, TILE.GOLD);
-                    this.player.goldCount = 0;
-                }
+                this.dropPlayerGoldOnDeath();
                 this.escapeLadderActive = false;
             }
 
@@ -6674,7 +6720,7 @@
             const reachable = this.findReachablePositions(startX, startY);
             let impossibleReason = '';
 
-            if (!reachable || reachable.size === 0) {
+            if (!reachable || reachable.size <= 1) {
                 impossibleReason = 'NO REACHABLE MOVES';
             }
 
