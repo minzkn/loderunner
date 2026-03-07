@@ -4900,19 +4900,19 @@
 
                 // Shift+N: Next level, Shift+P: Previous level
                 if (isDown && (e.code === 'KeyN' || e.code === 'KeyP' || e.keyCode === 78 || e.keyCode === 80) && e.shiftKey) {
-                    if (this.isStrictProfile()) {
-                        e.preventDefault();
-                        return;
-                    }
+                    const levelCount = this.activeLevels.length || 1;
                     if (e.code === 'KeyN' || e.keyCode === 78) {
-                        this.currentLevel++;
+                        this.currentLevel = this.currentLevel >= levelCount ? 1 : this.currentLevel + 1;
                     } else {
-                        this.currentLevel = Math.max(1, this.currentLevel - 1);
+                        this.currentLevel = this.currentLevel <= 1 ? levelCount : this.currentLevel - 1;
                     }
+                    this.demoMode = false;
+                    this.hideDeathOverlay();
                     this.loadLevel(this.currentLevel);
                     this.gameState = STATE.PLAYING;
                     this.showMessage('LEVEL ' + this.currentLevel);
                     e.preventDefault();
+                    return;
                 }
 
                 if (isDown) {
@@ -5988,12 +5988,12 @@
         updatePlayer() {
             const p = this.player;
             const keys = this.keys;
-            const px = Math.floor(p.x + 0.5);
-            const py = Math.floor(p.y + 0.5);
+            let px = Math.floor(p.x + 0.5);
+            let py = Math.floor(p.y + 0.5);
 
-            const onLadder = this.isLadder(px, py);
-            const onBar = this.isBar(px, py) || this.isBar(px, py - 1);
-            
+            let onLadder = this.isLadder(px, py);
+            let onBar = this.isBar(px, py) || this.isBar(px, py - 1);
+
             // False Floor (TRAP) check - falls through after 1 frame delay
             const onFalseFloor = this.isFalseFloor(px, py + 1);
             if (onFalseFloor) {
@@ -6005,33 +6005,64 @@
             } else {
                 p.falseFloorTimer = 0;
             }
-            
-            const onGround = (this.isSolidForPlayer(px, py + 1) || this.isFalseFloor(px, py + 1) || this.isLadder(px, py) || this.isLadder(px, py + 1))
+
+            let onGround = (this.isSolidForPlayer(px, py + 1) || this.isFalseFloor(px, py + 1) || this.isLadder(px, py) || this.isLadder(px, py + 1))
                 && !(onFalseFloor && p.falseFloorTimer > 1)
                 && !this.isDugHole(px, py + 1);
-            
-            // Check for trapped entity (player or enemy) below player - can walk on their head
-            const onTrappedEntity = this.getTrappedEntityAtTile(px, py + 1);
 
-            // Check if player is in a hole - fall through if below is empty
+            // Check for trapped entity (player or enemy) below player - can walk on their head
+            let onTrappedEntity = this.getTrappedEntityAtTile(px, py + 1);
+
+            // Check if player is in a hole
             if (p.trapped > 0) {
                 p.trapped--;
                 const holeX = Math.floor(p.x);
                 const holeY = Math.floor(p.y);
-                const trappedEnemy = this.getTrappedEnemyAtTile(holeX, holeY + 1);
-                
-                // Lock player in hole position
-                p.x = holeX + 0.5;
-                p.vx = 0;
-                p.vy = 0;
 
-                // If below is empty or hole, fall through instead of staying trapped
+                // Check if below is empty or another hole - player must fall through
                 const belowTile = this.getTile(holeX, holeY + 1);
                 const belowIsHole = this.isDugHole(holeX, holeY + 1);
                 if (belowTile === TILE.EMPTY || belowIsHole) {
-                    p.trapped = 0;
-                } else if (trappedEnemy) {
-                    // Player can walk on trapped enemy to escape
+                    // Fall through: centered, vertical only, no horizontal movement
+                    p.x = holeX + 0.5;
+                    p.vx = 0;
+                    p.vy = 0.25 * this.speedMultiplier;
+                    p.y += p.vy;
+                    // Keep trapped state active so this block handles subsequent frames
+                    p.trapped = Math.max(p.trapped, 2);
+
+                    // Check if reached next tile row
+                    const newY = Math.floor(p.y);
+                    if (newY > holeY) {
+                        p.y = newY; // Snap to integer
+                        const newBelowTile = this.getTile(holeX, newY + 1);
+                        const newBelowIsHole = this.isDugHole(holeX, newY + 1);
+                        if (newBelowTile !== TILE.EMPTY && !newBelowIsHole) {
+                            // Landed on solid ground - re-trap here
+                            p.trapped = HOLE_FILL_TIME;
+                            p.vy = 0;
+                            this.sound.play('trap');
+                        }
+                        // else: below is still empty/hole, keep falling next frame
+                    }
+                    return;
+                }
+
+                // Below is solid - normal trapped behavior
+                p.y = holeY;
+                p.vx = 0;
+                p.vy = 0;
+
+                const trappedEnemy = this.getTrappedEnemyAtTile(holeX, holeY + 1);
+                const holeBounds = this.getConnectedHoleBounds(holeX, holeY);
+                const minHoleX = holeBounds ? holeBounds.left + 0.5 : holeX + 0.5;
+                const maxHoleX = holeBounds ? holeBounds.right + 0.5 : holeX + 0.5;
+
+                // Keep the player constrained to the connected hole segment.
+                p.x = Math.max(minHoleX, Math.min(p.x, maxHoleX));
+
+                // Movement within connected holes / escape via trapped enemy
+                if (trappedEnemy) {
                     if (keys.LEFT && holeX > 0 && !this.isSolidForPlayer(holeX - 1, holeY)) {
                         p.trapped = 0;
                         p.x = holeX - 1;
@@ -6043,15 +6074,56 @@
                         p.y = holeY - 1;
                         p.dir = 1;
                     }
+                } else if (holeBounds && holeBounds.left !== holeBounds.right) {
+                    const holeSpeed = PLAYER_SPEED * this.speedMultiplier;
+                    if (keys.LEFT && p.x > minHoleX) {
+                        p.x = Math.max(minHoleX, p.x - holeSpeed);
+                        p.dir = -1;
+                    } else if (keys.RIGHT && p.x < maxHoleX) {
+                        p.x = Math.min(maxHoleX, p.x + holeSpeed);
+                        p.dir = 1;
+                    }
+
+                    // After movement, re-check below at new X position
+                    const curX = Math.floor(p.x);
+                    const curBelowTile = this.getTile(curX, holeY + 1);
+                    const curBelowIsHole = this.isDugHole(curX, holeY + 1);
+                    if (curBelowTile === TILE.EMPTY || curBelowIsHole) {
+                        // Snap to center of current tile and start falling next frame
+                        p.x = curX + 0.5;
+                        p.trapped = Math.max(p.trapped, 2);
+                        return;
+                    }
                 }
 
-                // Try to escape after hole fills (original C64 behavior)
+                // Try to escape after hole fills
                 if (p.trapped <= 0) {
-                    // Player escapes when hole fills - same as original
                     p.trapped = 0;
                 }
-                
-                // Don't process normal movement when trapped (unless escaping via trapped enemy)
+
+                // Allow digging while trapped
+                if (p.trapped > 0 && (keys.DIGL || keys.DIGR)) {
+                    const hx = Math.floor(p.x);
+                    const hy = Math.floor(p.y);
+                    const digDir = keys.DIGL ? -1 : 1;
+                    // Priority: directly below (to fall through), then side-below
+                    const digTargets = [
+                        { x: hx, y: hy + 1 },
+                        { x: hx + digDir, y: hy + 1 }
+                    ];
+                    for (const dt of digTargets) {
+                        if (dt.x >= 0 && dt.x < LEVEL_WIDTH && dt.y >= 0 && dt.y < LEVEL_HEIGHT &&
+                            this.canDigTile(dt.x, dt.y)) {
+                            this.dig(dt.x, dt.y);
+                            break;
+                        }
+                    }
+                    keys.DIGL = false;
+                    keys.DIGR = false;
+                    // After digging, fall-through check will happen next frame automatically
+                }
+
+                // Don't process normal movement when trapped
                 if (p.trapped > 0) {
                     return;
                 }
@@ -6067,10 +6139,10 @@
                     const playerRight = p.x + 0.3;
                     const playerBottom = p.y;
                     const playerTop = p.y + 1;
-                    
+
                     const isOverHoleX = playerRight > hole.x && playerLeft < hole.x + 1;
                     const isOverHoleY = playerBottom < hole.y + 1 && playerTop > hole.y;
-                    
+
                     if (isOverHoleX && isOverHoleY) {
                         // Only trap if hole is not already occupied
                         if (!this.isHoleOccupied(hole.x, hole.y, null)) {
@@ -6078,8 +6150,8 @@
                             const belowTile = this.getTile(hole.x, hole.y + 1);
                             const belowIsHole = this.isDugHole(hole.x, hole.y + 1);
                             if (belowTile === TILE.EMPTY || belowIsHole) {
-                                // Keep falling - don't trap
-                                break;
+                                // Keep falling - don't trap, check next hole below
+                                continue;
                             }
                             // Trap player in hole
                             p.trapped = HOLE_FILL_TIME;
@@ -6776,6 +6848,29 @@
                 }
             }
             return false;
+        }
+
+        getConnectedHoleBounds(holeX, holeY) {
+            if (!this.isDugHole(holeX, holeY)) {
+                return null;
+            }
+
+            let left = holeX;
+            let right = holeX;
+
+            while (left > 0 &&
+                   this.isDugHole(left - 1, holeY) &&
+                   !this.isHoleOccupied(left - 1, holeY, null)) {
+                left--;
+            }
+
+            while (right < LEVEL_WIDTH - 1 &&
+                   this.isDugHole(right + 1, holeY) &&
+                   !this.isHoleOccupied(right + 1, holeY, null)) {
+                right++;
+            }
+
+            return { left, right };
         }
 
         getPossibleMoves(x, y) {
