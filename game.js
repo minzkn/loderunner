@@ -4716,7 +4716,7 @@
                 }
 
                 const ladderColumns = [];
-                for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                for (let x = 0; x < LEVEL_WIDTH; x++) {
                     for (let y = 0; y < LEVEL_HEIGHT; y++) {
                         if (rows[y][x] === 'H') {
                             ladderColumns.push({ x, y });
@@ -4728,7 +4728,7 @@
                 let seedColumns = ladderColumns;
                 if (seedColumns.length === 0) {
                     const barColumns = [];
-                    for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                    for (let x = 0; x < LEVEL_WIDTH; x++) {
                         for (let y = 0; y < LEVEL_HEIGHT; y++) {
                             if (rows[y][x] === '-') {
                                 barColumns.push({ x, y });
@@ -4739,7 +4739,20 @@
                     seedColumns = barColumns;
                 }
 
-                seedColumns.sort((a, b) => a.y - b.y);
+                // Prefer columns with unblocked path to top
+                const isBlocked = (col) => {
+                    for (let y = 0; y < col.y; y++) {
+                        const ch = rows[y][col.x];
+                        if (ch !== '.' && ch !== 'H' && ch !== '-' && ch !== 'e') return true;
+                    }
+                    return false;
+                };
+                seedColumns.sort((a, b) => {
+                    const aBlocked = isBlocked(a) ? 1 : 0;
+                    const bBlocked = isBlocked(b) ? 1 : 0;
+                    if (aBlocked !== bBlocked) return aBlocked - bBlocked;
+                    return a.y - b.y;
+                });
                 const takeCount = Math.min(3, seedColumns.length);
 
                 for (let i = 0; i < takeCount; i++) {
@@ -4747,6 +4760,29 @@
                     for (let y = 0; y <= col.y; y++) {
                         if (rows[y][col.x] === '.') {
                             rows[y][col.x] = 'e';
+                        }
+                    }
+                }
+
+                // Fallback: ensure at least one 'e' at row 0
+                let hasEscapeRow0 = false;
+                for (let x = 0; x < LEVEL_WIDTH; x++) {
+                    if (rows[0][x] === 'e') { hasEscapeRow0 = true; break; }
+                }
+                if (!hasEscapeRow0) {
+                    // Place escape seeds at empty positions only.
+                    // Bars ('-') must NOT be replaced here — they are needed for
+                    // level traversal. activateEscape() converts bars at runtime.
+                    for (let x = 0; x < LEVEL_WIDTH; x++) {
+                        if (rows[0][x] === '.') {
+                            for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                                if (rows[y][x] === '.') {
+                                    rows[y][x] = 'e';
+                                } else {
+                                    break;
+                                }
+                            }
+                            break;
                         }
                     }
                 }
@@ -5794,7 +5830,7 @@
         dig(digX, digY) {
             if (this.canDigTile(digX, digY)) {
                 this.setTile(digX, digY, TILE.EMPTY);
-                this.dugHoles.push({ x: digX, y: digY, timer: HOLE_FILL_TIME }); // 300 frames at 30fps (10 seconds - original Apple II)
+                this.dugHoles.push({ x: digX, y: digY, timer: HOLE_FILL_TIME }); // HOLE_FILL_TIME frames at 30fps (~7 seconds)
                 this.sound.play('dig');
 
                 if (!this.isStrictProfile()) {
@@ -5915,7 +5951,8 @@
             // Strict profiles prefer static hidden ladders embedded in level data.
             if (!this.rules.dynamicEscapeLadder && this.hiddenEscapeTiles && this.hiddenEscapeTiles.length > 0) {
                 for (const pos of this.hiddenEscapeTiles) {
-                    if (this.getTile(pos.x, pos.y) === TILE.EMPTY || this.getTile(pos.x, pos.y) === TILE.LADDER) {
+                    const t = this.getTile(pos.x, pos.y);
+                    if (t === TILE.EMPTY || t === TILE.LADDER || t === TILE.BAR) {
                         this.setTile(pos.x, pos.y, TILE.ESCAPE_LADDER);
                         generated = true;
                     }
@@ -5926,7 +5963,7 @@
 
                 // Find unique ladder columns and their highest positions
                 const ladderColumns = [];
-                for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                for (let x = 0; x < LEVEL_WIDTH; x++) {
                     for (let y = 0; y < LEVEL_HEIGHT; y++) {
                         if (this.isLadder(x, y)) {
                             ladderColumns.push({ x: x, y: y });
@@ -5935,17 +5972,33 @@
                     }
                 }
 
-                // If there are ladders, sort by height (lowest y = highest on screen)
+                // Prefer columns with unblocked path to top
+                const isBlockedCol = (col) => {
+                    for (let cy = 0; cy < col.y; cy++) {
+                        const t = this.getTile(col.x, cy);
+                        if (t !== TILE.EMPTY && t !== TILE.LADDER && t !== TILE.BAR && t !== TILE.ESCAPE_LADDER) return true;
+                    }
+                    return false;
+                };
+
+                // If there are ladders, sort by unblocked first, then height
                 if (ladderColumns.length > 0) {
-                    ladderColumns.sort((a, b) => a.y - b.y);
+                    ladderColumns.sort((a, b) => {
+                        const aB = isBlockedCol(a) ? 1 : 0;
+                        const bB = isBlockedCol(b) ? 1 : 0;
+                        if (aB !== bB) return aB - bB;
+                        return a.y - b.y;
+                    });
 
                     // Take only top 1-3 ladders (most accessible ones)
                     const numToTake = Math.min(3, ladderColumns.length);
                     for (let i = 0; i < numToTake; i++) {
                         const col = ladderColumns[i];
                         // Create escape ladder from top to this ladder
+                        // Also convert bars to escape ladders for climbable exit path
                         for (let y = 0; y <= col.y; y++) {
-                            if (this.getTile(col.x, y) === TILE.EMPTY || this.getTile(col.x, y) === TILE.LADDER) {
+                            const t = this.getTile(col.x, y);
+                            if (t === TILE.EMPTY || t === TILE.LADDER || t === TILE.BAR) {
                                 this.setTile(col.x, y, TILE.ESCAPE_LADDER);
                                 generated = true;
                             }
@@ -5956,7 +6009,7 @@
                 // If no ladders, try bars
                 if (ladderColumns.length === 0) {
                     const barColumns = [];
-                    for (let x = 2; x < LEVEL_WIDTH - 2; x++) {
+                    for (let x = 0; x < LEVEL_WIDTH; x++) {
                         for (let y = 0; y < LEVEL_HEIGHT; y++) {
                             if (this.getTile(x, y) === TILE.BAR) {
                                 barColumns.push({ x: x, y: y });
@@ -5966,17 +6019,56 @@
                     }
 
                     if (barColumns.length > 0) {
-                        barColumns.sort((a, b) => a.y - b.y);
+                        barColumns.sort((a, b) => {
+                            const aB = isBlockedCol(a) ? 1 : 0;
+                            const bB = isBlockedCol(b) ? 1 : 0;
+                            if (aB !== bB) return aB - bB;
+                            return a.y - b.y;
+                        });
                         const numToTake = Math.min(3, barColumns.length);
                         for (let i = 0; i < numToTake; i++) {
                             const col = barColumns[i];
                             for (let y = 0; y <= col.y; y++) {
-                                if (this.getTile(col.x, y) === TILE.EMPTY) {
+                                const t = this.getTile(col.x, y);
+                                if (t === TILE.EMPTY || t === TILE.BAR) {
                                     this.setTile(col.x, y, TILE.ESCAPE_LADDER);
                                     generated = true;
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Fallback: ensure at least one escape ladder tile at row 0
+            // so the player can always exit.
+            if (generated) {
+                let hasEscapeAtRow0 = false;
+                for (let x = 0; x < LEVEL_WIDTH; x++) {
+                    if (this.getTile(x, 0) === TILE.ESCAPE_LADDER) {
+                        hasEscapeAtRow0 = true;
+                        break;
+                    }
+                }
+                if (!hasEscapeAtRow0) {
+                    // Find best column: prefer EMPTY at row 0, then BAR, then LADDER
+                    for (const acceptTile of [TILE.EMPTY, TILE.BAR, TILE.LADDER]) {
+                        let found = false;
+                        for (let x = 0; x < LEVEL_WIDTH; x++) {
+                            if (this.getTile(x, 0) === acceptTile) {
+                                for (let y = 0; y < LEVEL_HEIGHT; y++) {
+                                    const t = this.getTile(x, y);
+                                    if (t === TILE.EMPTY || t === TILE.LADDER || t === TILE.BAR) {
+                                        this.setTile(x, y, TILE.ESCAPE_LADDER);
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) break;
                     }
                 }
             }
@@ -6345,8 +6437,11 @@
                                     if (e.hasGold) {
                                         e.hasGold = false;
                                         this.sound.play('drop');
-                                        if (this.getTile(hole.x, hole.y - 1) === TILE.EMPTY) {
-                                            this.setTile(hole.x, hole.y - 1, TILE.GOLD);
+                                        if (!this.dropGoldAt(hole.x, hole.y, true)) {
+                                            this.goldCount = Math.max(0, this.goldCount - 1);
+                                            if (this.goldCollected >= this.goldCount && !this.escapeLadderActive) {
+                                                this.activateEscape();
+                                            }
                                         }
                                     }
                                     break;
@@ -6623,7 +6718,12 @@
             if (e.hasGold) {
                 const dropX = Math.floor(e.x + 0.5);
                 const dropY = Math.floor(e.y + 0.5);
-                this.dropGoldAt(dropX, dropY, true);
+                if (!this.dropGoldAt(dropX, dropY, true)) {
+                    this.goldCount = Math.max(0, this.goldCount - 1);
+                    if (this.goldCollected >= this.goldCount && !this.escapeLadderActive) {
+                        this.activateEscape();
+                    }
+                }
                 e.hasGold = false;
             }
 
@@ -7472,15 +7572,15 @@
                     break;
 
                 case TILE.SOLID:
-                    // C64 style: blue/gray solid block
+                    // Apple II style: blue solid block
                     ctx.fillStyle = COLORS.BLUE;
                     ctx.fillRect(px, py, T, T);
-                    
-                    // Simple texture pattern
-                    ctx.fillStyle = '#1A1449'; // darker blue
+
+                    // Texture pattern
+                    ctx.fillStyle = '#1A1449';
                     ctx.fillRect(px + T * 0.1, py + T * 0.1, T * 0.35, T * 0.35);
                     ctx.fillRect(px + T * 0.55, py + T * 0.55, T * 0.35, T * 0.35);
-                    
+
                     // Border
                     ctx.strokeStyle = COLORS.LIGHT_BLUE;
                     ctx.lineWidth = s(1);
@@ -7488,23 +7588,23 @@
                     break;
 
                 case TILE.LADDER:
-                    // C64 style: simple wooden ladder
-                    ctx.fillStyle = COLORS.YELLOW;
+                    // Apple II style: green ladder
+                    ctx.fillStyle = COLORS.GREEN;
                     // Left rail
                     ctx.fillRect(px + T * 0.15, py, T * 0.1, T);
                     // Right rail
                     ctx.fillRect(px + T * 0.75, py, T * 0.1, T);
                     // Rungs
-                    ctx.fillStyle = COLORS.ORANGE;
+                    ctx.fillStyle = COLORS.CYAN;
                     for (let i = 0; i < 3; i++) {
                         ctx.fillRect(px + T * 0.25, py + T * 0.15 + i * T * 0.35, T * 0.5, T * 0.08);
                     }
                     break;
 
                 case TILE.ESCAPE_LADDER:
-                    // C64 style: flashing escape ladder
+                    // Apple II style: flashing escape ladder
                     const flash = Math.floor(this.frameCount / 4) % 2;
-                    ctx.fillStyle = flash ? COLORS.YELLOW : COLORS.LIGHT_GREEN;
+                    ctx.fillStyle = flash ? COLORS.GREEN : COLORS.CYAN;
                     // Left rail
                     ctx.fillRect(px + T * 0.15, py, T * 0.1, T);
                     // Right rail
@@ -7516,12 +7616,12 @@
                     break;
 
                 case TILE.BAR:
-                    // C64 style: simple horizontal bar
-                    ctx.fillStyle = COLORS.LIGHT_GRAY;
-                    ctx.fillRect(px, py + T * 0.35, T, T * 0.2);
-                    ctx.strokeStyle = COLORS.GRAY;
+                    // Apple II style: orange horizontal rope/bar
+                    ctx.fillStyle = COLORS.ORANGE;
+                    ctx.fillRect(px, py + T * 0.4, T, T * 0.15);
+                    ctx.strokeStyle = COLORS.BROWN;
                     ctx.lineWidth = s(1);
-                    ctx.strokeRect(px, py + T * 0.35, T, T * 0.2);
+                    ctx.strokeRect(px, py + T * 0.4, T, T * 0.15);
                     break;
 
                 case TILE.TRAP:
@@ -7569,33 +7669,33 @@
             const T = TILE_SIZE;
             const s = (v) => v * SCALE;
 
-            // C64 style: simple red brick
-            // Fill with mortar color (dark brown)
-            ctx.fillStyle = COLORS.BROWN;
+            // Apple II style: purple/violet brick
+            // Fill with dark mortar
+            ctx.fillStyle = '#220033';
             ctx.fillRect(px, py, T, T);
 
-            // Draw brick pattern (simple red blocks - C64 red)
+            // Draw brick pattern (Apple II purple)
             const brickH = T * 0.28;
             const gap = s(1);
 
             // Row 1
-            ctx.fillStyle = COLORS.RED;
+            ctx.fillStyle = COLORS.PURPLE;
             ctx.fillRect(px + gap, py + gap, T * 0.45, brickH);
-            ctx.fillStyle = '#8B6B5C'; // darker red
+            ctx.fillStyle = '#7700BB';
             ctx.fillRect(px + T * 0.52, py + gap, T * 0.43, brickH);
 
             // Row 2 (offset)
-            ctx.fillStyle = '#8B6B5C';
+            ctx.fillStyle = '#7700BB';
             ctx.fillRect(px + gap, py + T * 0.36, T * 0.2, brickH);
-            ctx.fillStyle = COLORS.RED;
+            ctx.fillStyle = COLORS.PURPLE;
             ctx.fillRect(px + T * 0.28, py + T * 0.36, T * 0.44, brickH);
-            ctx.fillStyle = '#7A5A4A';
+            ctx.fillStyle = '#660099';
             ctx.fillRect(px + T * 0.78, py + T * 0.36, T * 0.17, brickH);
 
             // Row 3
-            ctx.fillStyle = '#8B6B5C';
+            ctx.fillStyle = '#7700BB';
             ctx.fillRect(px + gap, py + T * 0.68, T * 0.45, brickH);
-            ctx.fillStyle = COLORS.RED;
+            ctx.fillStyle = COLORS.PURPLE;
             ctx.fillRect(px + T * 0.52, py + T * 0.68, T * 0.43, brickH);
         }
 
@@ -7620,18 +7720,18 @@
             const startY = py + T - h;
             const s = (v) => v * SCALE;
 
-            // C64 style: Simple brick reforming (solid color with border)
-            ctx.fillStyle = COLORS.RED;
+            // Apple II style: purple brick reforming
+            ctx.fillStyle = COLORS.PURPLE;
             ctx.fillRect(px + s(1), startY, T - s(2), h);
-            
+
             // Border
-            ctx.strokeStyle = COLORS.BROWN;
+            ctx.strokeStyle = '#660099';
             ctx.lineWidth = s(1);
             ctx.strokeRect(px + s(1), startY, T - s(2), h);
 
-            // Simple line pattern (C64 style)
+            // Line pattern
             if (h > T * 0.3) {
-                ctx.fillStyle = COLORS.BROWN;
+                ctx.fillStyle = '#660099';
                 ctx.fillRect(px + s(3), startY + h * 0.3, T - s(6), s(1));
             }
             if (h > T * 0.6) {
