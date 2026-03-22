@@ -5675,7 +5675,7 @@
                             this.hiddenEscapeTiles.push({ x, y });
                             break;
                         case 'P':
-                            this.player = { x: x, y: y, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0, goldCount: 0, falseFloorTimer: 0 };
+                            this.player = { x: x, y: y, vx: 0, vy: 0, frame: 0, dir: 1, goldCount: 0, falseFloorTimer: 0 };
                             break;
                         case 'E':
                             this.enemies.push({
@@ -5693,7 +5693,7 @@
             }
 
             if (!this.player) {
-                this.player = { x: 1, y: LEVEL_HEIGHT - 2, vx: 0, vy: 0, frame: 0, dir: 1, trapped: 0, goldCount: 0, falseFloorTimer: 0 };
+                this.player = { x: 1, y: LEVEL_HEIGHT - 2, vx: 0, vy: 0, frame: 0, dir: 1, goldCount: 0, falseFloorTimer: 0 };
             }
 
             this.updateUI();
@@ -5760,12 +5760,7 @@
         }
 
         isHoleOccupied(holeX, holeY, excludeEnemy) {
-            // Check if player is trapped in this hole
-            if (this.player && this.player.trapped > 0 &&
-                Math.floor(this.player.x) === holeX && Math.floor(this.player.y) === holeY) {
-                return true;
-            }
-            // Check if any enemy is trapped in this hole
+            // Check if any enemy is trapped in this hole (player is never trapped per original Apple II)
             for (const e of this.enemies) {
                 if (e !== excludeEnemy && e.trapped > 0 &&
                     Math.floor(e.x) === holeX && Math.floor(e.y) === holeY) {
@@ -5775,23 +5770,15 @@
             return false;
         }
 
-        // Check if there's a trapped entity (player or enemy) at tile that can be walked on
+        // Check if there's a trapped entity (enemy only) at tile that can be walked on
         getTrappedEntityAtTile(tileX, tileY) {
-            // Check for trapped player first
-            if (this.player && this.player.trapped > 0) {
-                const playerTileX = Math.floor(this.player.x);
-                const playerTileY = Math.floor(this.player.y);
-                if (playerTileX === tileX && playerTileY === tileY) {
-                    return this.player;
-                }
-            }
-            // Then check for trapped enemies
+            // Player is never trapped per original Apple II - only check enemies
             return this.getTrappedEnemyAtTile(tileX, tileY);
         }
 
-        // Check if player is trapped in a hole
+        // Player is never trapped per original Apple II rules
         isPlayerTrapped() {
-            return this.player && this.player.trapped > 0;
+            return false;
         }
 
         getEnemyAt(x, y) {
@@ -6105,158 +6092,9 @@
             // Check for trapped entity (player or enemy) below player - can walk on their head
             let onTrappedEntity = this.getTrappedEntityAtTile(px, py + 1);
 
-            // Check if player is in a hole
-            if (p.trapped > 0) {
-                p.trapped--;
-                const holeX = Math.floor(p.x);
-                const holeY = Math.floor(p.y);
-
-                // Check if below is empty or another hole - player must fall through
-                const belowTile = this.getTile(holeX, holeY + 1);
-                const belowIsHole = this.isDugHole(holeX, holeY + 1);
-                if (belowTile === TILE.EMPTY || belowIsHole) {
-                    // Fall through: centered, vertical only, no horizontal movement
-                    p.x = holeX + 0.5;
-                    p.vx = 0;
-                    p.vy = 0.25 * this.speedMultiplier;
-                    p.y += p.vy;
-                    // Keep trapped state active so this block handles subsequent frames
-                    p.trapped = Math.max(p.trapped, 2);
-
-                    // Check if reached next tile row
-                    const newY = Math.floor(p.y);
-                    if (newY > holeY) {
-                        p.y = newY; // Snap to integer
-                        const newBelowTile = this.getTile(holeX, newY + 1);
-                        const newBelowIsHole = this.isDugHole(holeX, newY + 1);
-                        if (newBelowTile !== TILE.EMPTY && !newBelowIsHole) {
-                            // Landed on solid ground - re-trap here
-                            p.trapped = HOLE_FILL_TIME;
-                            p.vy = 0;
-                            this.sound.play('trap');
-                        }
-                        // else: below is still empty/hole, keep falling next frame
-                    }
-                    return;
-                }
-
-                // Below is solid - normal trapped behavior
-                p.y = holeY;
-                p.vx = 0;
-                p.vy = 0;
-
-                const trappedEnemy = this.getTrappedEnemyAtTile(holeX, holeY + 1);
-                const holeBounds = this.getConnectedHoleBounds(holeX, holeY);
-                const minHoleX = holeBounds ? holeBounds.left + 0.5 : holeX + 0.5;
-                const maxHoleX = holeBounds ? holeBounds.right + 0.5 : holeX + 0.5;
-
-                // Keep the player constrained to the connected hole segment.
-                p.x = Math.max(minHoleX, Math.min(p.x, maxHoleX));
-
-                // Movement within connected holes / escape via trapped enemy
-                if (trappedEnemy) {
-                    if (keys.LEFT && holeX > 0 && !this.isSolidForPlayer(holeX - 1, holeY)) {
-                        p.trapped = 0;
-                        p.x = holeX - 1;
-                        p.y = holeY - 1;
-                        p.dir = -1;
-                    } else if (keys.RIGHT && holeX < LEVEL_WIDTH - 1 && !this.isSolidForPlayer(holeX + 1, holeY)) {
-                        p.trapped = 0;
-                        p.x = holeX + 1;
-                        p.y = holeY - 1;
-                        p.dir = 1;
-                    }
-                } else if (holeBounds && holeBounds.left !== holeBounds.right) {
-                    const holeSpeed = PLAYER_SPEED * this.speedMultiplier;
-                    if (keys.LEFT && p.x > minHoleX) {
-                        p.x = Math.max(minHoleX, p.x - holeSpeed);
-                        p.dir = -1;
-                    } else if (keys.RIGHT && p.x < maxHoleX) {
-                        p.x = Math.min(maxHoleX, p.x + holeSpeed);
-                        p.dir = 1;
-                    }
-
-                    // After movement, re-check below at new X position
-                    const curX = Math.floor(p.x);
-                    const curBelowTile = this.getTile(curX, holeY + 1);
-                    const curBelowIsHole = this.isDugHole(curX, holeY + 1);
-                    if (curBelowTile === TILE.EMPTY || curBelowIsHole) {
-                        // Snap to center of current tile and start falling next frame
-                        p.x = curX + 0.5;
-                        p.trapped = Math.max(p.trapped, 2);
-                        return;
-                    }
-                }
-
-                // Try to escape after hole fills
-                if (p.trapped <= 0) {
-                    p.trapped = 0;
-                }
-
-                // Allow digging while trapped
-                if (p.trapped > 0 && (keys.DIGL || keys.DIGR)) {
-                    const hx = Math.floor(p.x);
-                    const hy = Math.floor(p.y);
-                    const digDir = keys.DIGL ? -1 : 1;
-                    // Priority: directly below (to fall through), then side-below
-                    const digTargets = [
-                        { x: hx, y: hy + 1 },
-                        { x: hx + digDir, y: hy + 1 }
-                    ];
-                    for (const dt of digTargets) {
-                        if (dt.x >= 0 && dt.x < LEVEL_WIDTH && dt.y >= 0 && dt.y < LEVEL_HEIGHT &&
-                            this.canDigTile(dt.x, dt.y)) {
-                            this.dig(dt.x, dt.y);
-                            break;
-                        }
-                    }
-                    keys.DIGL = false;
-                    keys.DIGR = false;
-                    // After digging, fall-through check will happen next frame automatically
-                }
-
-                // Don't process normal movement when trapped
-                if (p.trapped > 0) {
-                    return;
-                }
-            }
-
-            // Check if player falls into a trap/hole
-            // Apple II original: player CANNOT climb out of holes (unlike enemies)
-            if (!onGround && !onLadder && !onBar && p.vy > 0) {
-                for (const hole of this.dugHoles) {
-                    // Check if player is over this hole (including edge cases)
-                    // Allow for player being on the edge of the hole
-                    const playerLeft = p.x - 0.3;
-                    const playerRight = p.x + 0.3;
-                    const playerBottom = p.y;
-                    const playerTop = p.y + 1;
-
-                    const isOverHoleX = playerRight > hole.x && playerLeft < hole.x + 1;
-                    const isOverHoleY = playerBottom < hole.y + 1 && playerTop > hole.y;
-
-                    if (isOverHoleX && isOverHoleY) {
-                        // Only trap if hole is not already occupied
-                        if (!this.isHoleOccupied(hole.x, hole.y, null)) {
-                            // If below is empty or is also a hole, keep falling through (don't trap)
-                            const belowTile = this.getTile(hole.x, hole.y + 1);
-                            const belowIsHole = this.isDugHole(hole.x, hole.y + 1);
-                            if (belowTile === TILE.EMPTY || belowIsHole) {
-                                // Keep falling - don't trap, check next hole below
-                                continue;
-                            }
-                            // Trap player in hole
-                            p.trapped = HOLE_FILL_TIME;
-                            p.x = hole.x + 0.5;
-                            p.y = hole.y;
-                            p.vx = 0;
-                            p.vy = 0;
-                            this.sound.play('trap');
-                            break;
-                        }
-                    }
-                }
-            }
+            // Apple II original: player is NOT frozen/trapped in holes.
+            // Player moves normally - just cannot climb up without a ladder.
+            // Death occurs only when a hole refills while the player is at that position (in updateHoles).
 
             // Gravity
             if (!onGround && !onLadder && !onBar && !onTrappedEntity) {
@@ -6763,24 +6601,6 @@
         checkCollisions() {
             const p = this.player;
 
-            // Skip collision check if player is trapped in a hole (enemies can walk on player's head)
-            if (p.trapped > 0) {
-                // But enemies can still attack player in hole
-                for (const e of this.enemies) {
-                    if (e.trapped > 0) continue; // Skip trapped enemies
-                    
-                    const dx = Math.abs(p.x - e.x);
-                    const dy = p.y - e.y;
-                    
-                    // Enemy can attack player in hole if close enough
-                    if (dx < 0.7 && dy > -0.3 && dy < 0.7) {
-                        this.playerDie();
-                        return;
-                    }
-                }
-                return;
-            }
-
             for (const e of this.enemies) {
                 // Skip collision if enemy is trapped (player can walk on their head)
                 if (e.trapped > 0) continue;
@@ -6879,8 +6699,8 @@
                 return;
             }
 
-            // Skip while trapped/death transition is still resolving
-            if (this.player.trapped > 0 || this.gameState === STATE.DYING) return;
+            // Skip while death transition is still resolving
+            if (this.gameState === STATE.DYING) return;
 
             // Run heavy path check at low frequency for stability
             this.stuckCheckTimer++;
