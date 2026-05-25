@@ -4522,6 +4522,16 @@
                 if (!inside(e.x, 0, LEVEL_WIDTH - 1) || !inside(e.y, 0, LEVEL_HEIGHT - 1)) {
                     throw new Error(`ENEMY_OUT_OF_BOUNDS_${i}`);
                 }
+                if (e.trapped > 0) {
+                    const trapX = this.getEnemyTrapX(e);
+                    const trapY = this.getEnemyTrapY(e);
+                    if (!Number.isInteger(trapX) || !Number.isInteger(trapY)) {
+                        throw new Error(`ENEMY_INVALID_TRAP_${i}`);
+                    }
+                    if (trapX < 0 || trapX >= LEVEL_WIDTH || trapY < 0 || trapY >= LEVEL_HEIGHT) {
+                        throw new Error(`ENEMY_TRAP_OUT_OF_BOUNDS_${i}`);
+                    }
+                }
             }
 
             for (let i = 0; i < this.dugHoles.length; i++) {
@@ -4543,17 +4553,17 @@
                 const viewportWidth = window.innerWidth - marginX * 2;
                 const viewportHeight = window.innerHeight - marginY * 2;
 
-                // UI overhead (all proportional to scale):
-                // header: ~24px, message: ~24px, instructions: ~50px (with key display),
-                // copyright: ~14px, container padding: ~12px, borders: ~8px
-                const uiOverheadBase = 110;
+                // UI overhead (all proportional to scale).
+                const mobileLayout = window.matchMedia &&
+                    window.matchMedia('(pointer: coarse), (max-width: 700px)').matches;
+                const uiOverheadBase = mobileLayout ? 230 : 110;
                 const containerPadding = 12;
 
                 // Calculate scale to fit both width and height
                 const scaleX = viewportWidth / (BASE_WIDTH + containerPadding);
                 const scaleY = viewportHeight / (BASE_HEIGHT + uiOverheadBase + containerPadding);
                 SCALE = Math.min(scaleX, scaleY);
-                SCALE = Math.max(0.5, Math.min(SCALE, 2.5));
+                SCALE = Math.max(0.05, Math.min(SCALE, 2.5));
 
                 // Apply device pixel ratio for crisp rendering
                 const dpr = window.devicePixelRatio || 1;
@@ -5634,6 +5644,7 @@
             }
             const levelIndex = ((levelNum - 1) % levels.length + levels.length) % levels.length;
             const levelData = levels[levelIndex];
+            this.currentLevel = levelIndex + 1;
 
             this.level = [];
             this.enemies = [];
@@ -5682,6 +5693,7 @@
                                 x: x, y: y, vx: 0, vy: 0,
                                 startX: x, startY: y,
                                 hasGold: false, trapped: 0,
+                                trapX: null, trapY: null,
                                 frame: 0, dir: 1,
                                 goldPickupCooldown: 0
                             });
@@ -5759,11 +5771,19 @@
             return false;
         }
 
+        getEnemyTrapX(enemy) {
+            return Number.isInteger(enemy.trapX) ? enemy.trapX : Math.floor(enemy.x);
+        }
+
+        getEnemyTrapY(enemy) {
+            return Number.isInteger(enemy.trapY) ? enemy.trapY : Math.floor(enemy.y);
+        }
+
         isHoleOccupied(holeX, holeY, excludeEnemy) {
             // Check if any enemy is trapped in this hole (player is never trapped per original Apple II)
             for (const e of this.enemies) {
                 if (e !== excludeEnemy && e.trapped > 0 &&
-                    Math.floor(e.x) === holeX && Math.floor(e.y) === holeY) {
+                    this.getEnemyTrapX(e) === holeX && this.getEnemyTrapY(e) === holeY) {
                     return true;
                 }
             }
@@ -5792,7 +5812,9 @@
 
         getTrappedEnemyAt(x, y) {
             for (const e of this.enemies) {
-                if (e.trapped > 0 && Math.abs(e.x - x) < TRAPPED_ENEMY_RADIUS && Math.abs(e.y - y) < TRAPPED_ENEMY_RADIUS) {
+                if (e.trapped > 0 &&
+                    Math.abs(this.getEnemyTrapX(e) + 0.5 - x) < TRAPPED_ENEMY_RADIUS &&
+                    Math.abs(this.getEnemyTrapY(e) - y) < TRAPPED_ENEMY_RADIUS) {
                     return e;
                 }
             }
@@ -5803,9 +5825,8 @@
         getTrappedEnemyAtTile(tileX, tileY) {
             for (const e of this.enemies) {
                 if (e.trapped > 0) {
-                    // Enemy trapped position: e.x is at hole.x + 0.5, e.y is at hole.y
-                    const enemyTileX = Math.floor(e.x);
-                    const enemyTileY = Math.floor(e.y);
+                    const enemyTileX = this.getEnemyTrapX(e);
+                    const enemyTileY = this.getEnemyTrapY(e);
                     if (enemyTileX === tileX && enemyTileY === tileY) {
                         return e;
                     }
@@ -6263,14 +6284,14 @@
                                 // Only trap if hole is not already occupied
                                 if (!this.isHoleOccupied(hole.x, hole.y, e)) {
                                     e.trapped = ENEMY_TRAPPED_TIME;
+                                    e.trapX = hole.x;
+                                    e.trapY = hole.y;
                                     e.x = hole.x + 0.5;
                                     e.y = hole.y;
                                     e.vx = 0;
                                     e.vy = 0;
                                     this.sound.play('trap');
                                     caughtInHole = true;
-                                    this.score += 75;  // C64 original: trapping enemy 75 points
-                                    this.updateUI();
 
                                     if (e.hasGold) {
                                         e.hasGold = false;
@@ -6293,8 +6314,8 @@
 
                 if (e.trapped > 0) {
                     e.trapped--;
-                    const holeX = Math.floor(e.x);
-                    const holeY = Math.floor(e.y);
+                    const holeX = this.getEnemyTrapX(e);
+                    const holeY = this.getEnemyTrapY(e);
 
                     // Keep enemy locked in hole position
                     e.x = holeX + 0.5;
@@ -6307,6 +6328,8 @@
                         if (e.y <= holeY - 1) {
                             e.trapped = 0;
                             e.y = holeY - 1;
+                            e.trapX = null;
+                            e.trapY = null;
                         }
                     } else {
                         // Keep at hole position while trapped
@@ -6532,9 +6555,15 @@
 
                 if (hole.timer <= 0) {
                     for (const e of this.enemies) {
-                        if (Math.floor(e.x) === hole.x && Math.floor(e.y) === hole.y) {
+                        const trappedInThisHole = e.trapped > 0 &&
+                            this.getEnemyTrapX(e) === hole.x &&
+                            this.getEnemyTrapY(e) === hole.y;
+                        const occupyingThisHole = Math.floor(e.x) === hole.x && Math.floor(e.y) === hole.y;
+                        if (trappedInThisHole || occupyingThisHole) {
                             this.sound.play('kill');
+                            this.score += 75;
                             this.respawnEnemy(e);
+                            this.updateUI();
                         }
                     }
 
@@ -6594,6 +6623,8 @@
                 e.y = e.startY;
             }
             e.trapped = 0;
+            e.trapX = null;
+            e.trapY = null;
             e.goldPickupCooldown = 0;
             this.sound.play('respawn');
         }
@@ -6646,23 +6677,26 @@
 
         levelComplete() {
             this.gameState = STATE.LEVEL_COMPLETE;
-            
+            const levelCount = this.activeLevels.length || 1;
+            let nextMessage;
+
             // C64: After completing all 150 levels, speed increases and game restarts
-            if (this.rules.classicSpeedLoop && this.currentLevel >= 150 && this.gameMode === 'classic') {
+            if (this.rules.classicSpeedLoop && this.currentLevel >= levelCount && this.gameMode === 'classic') {
                 this.speedMultiplier = Math.min(this.speedMultiplier + 0.15, 2.0); // Max 2x speed
                 this.currentLevel = 1;
                 this.score = 0;
                 this.lives = this.rules.startLives;
-                this.showMessage('SPEED UP! ' + Math.round(this.speedMultiplier * 100) + '%');
+                nextMessage = 'SPEED UP! ' + Math.round(this.speedMultiplier * 100) + '% - LEVEL 1';
             } else {
-                this.currentLevel++;
+                this.currentLevel = this.currentLevel >= levelCount ? 1 : this.currentLevel + 1;
                 this.score += 1500;  // C64 original: level complete 1500 points
                 this.lives++;
+                nextMessage = 'LEVEL ' + this.currentLevel;
             }
             this.goldCollected = 0;  // 다음 레벨을 위해 초기화
             this.escapeLadderActive = false;
             this.updateUI();
-            this.showMessage('LEVEL ' + this.currentLevel);
+            this.showMessage(nextMessage);
             this.sound.play('levelup');
             this.levelCompleteTimer = LEVEL_COMPLETE_DELAY_FRAMES;
         }
@@ -6809,7 +6843,9 @@
             // Check for trapped enemy below (can stand on)
             let onTrappedEnemy = false;
             for (const e of this.enemies) {
-                if (e.trapped > 0 && Math.floor(e.x) === x && Math.floor(e.y) === y + 1) {
+                if (e.trapped > 0 &&
+                    this.getEnemyTrapX(e) === x &&
+                    this.getEnemyTrapY(e) === y + 1) {
                     onTrappedEnemy = true;
                     break;
                 }
@@ -7661,11 +7697,11 @@
 
             if (e.trapped > 0) {
                 // Apple II style: trapped enemy with more detailed animation
-                const tileX = Math.floor(e.x);
-                const tileY = Math.floor(e.y);
+                const tileX = this.getEnemyTrapX(e);
+                const tileY = this.getEnemyTrapY(e);
                 const hx = tileX * T;
                 const hy = tileY * T;
-                
+
                 // Dark hole effect
                 ctx.fillStyle = COLORS.BLACK;
                 ctx.fillRect(hx + s(1), hy + s(1), T - s(2), T - s(2));
